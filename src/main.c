@@ -19,12 +19,18 @@ enum CONTENT_TYPE {
 	// TODO: ogg etc
 };
 
+enum ICY_HEADER_STATE {
+	WRC_ICY_UNDECIDED,
+	WRC_ICY_HEADER_IN_BODY,
+	WRC_ICY_HEADER_DONE
+};
+
 typedef struct _mp3streamContext
 {
 	CURL* curl;
 	struct curl_slist* headers;
 	enum CONTENT_TYPE contentType;
-	bool icyHeaderDone;
+	enum ICY_HEADER_STATE icyHeaderDone;
 
 	char headerBuf[8192];
 	int headerBufAfterEndIdx;
@@ -45,52 +51,15 @@ typedef struct _mp3streamContext
 	FILE* out;
 } mp3streamContext;
 
-static size_t parseIcyHeader(mp3streamContext* ctx /*, char* freshData, size_t freshDataSize */)
+static void parseInBodyIcyHeader(mp3streamContext* ctx)
 {
-	char* freshData = ctx->headerBuf;
-	size_t freshDataSize = ctx->headerBufAfterEndIdx;
 
-	char* headerEnd = memmem(freshData, freshDataSize, "\r\n\r\n", 4);
-
-	// TODO: use strcspn() to also support just \r or \n for line-end too? (bad because I can't guarantee \0-termination)
-
-	if(headerEnd == NULL)
-	{
-		return 0;
-	}
-
-	headerEnd += 4; // \r\n\r\n
-
-	ctx->icyHeaderDone = true;
-
-	char buf[2048];
-	size_t headerLen = headerEnd - freshData;
-	memcpy(buf, freshData, headerLen);
-	buf[headerLen] = '\0';
-
-	printf("## header: %s\n", buf);
+	printf("## header: %s\n", ctx->headerBuf);
 
 	// TODO: parse the header, at least get "content-type:audio/mpeg"
-
-	return headerLen;
 }
 
 static int min(int a, int b) { return a < b ? a : b; }
-
-static int addToHeaderBuffer(mp3streamContext* ctx, char* data, size_t dataSize)
-{
-	const int bufSize = sizeof(ctx->headerBuf);
-
-	// FIXME: implement a proper circular buffer!
-
-	int numBytes = min(dataSize, bufSize - ctx->headerBufAfterEndIdx);
-
-	memcpy(ctx->headerBuf+ctx->headerBufAfterEndIdx, data, numBytes);
-
-	ctx->headerBufAfterEndIdx += numBytes;
-
-	return numBytes;
-}
 
 static bool initMP3(mp3streamContext* ctx)
 {
@@ -131,7 +100,6 @@ static void playMP3(mp3streamContext* ctx, void* data, size_t size)
 #endif // 0
 
 	byte decBuf[32768];
-	//printf("## %s\n", __func__);
 
 	if(ctx->handle == NULL) initMP3(ctx);
 
@@ -172,26 +140,54 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 
 	char* remData = freshData;
 
-	//if(ctx->dataWritten > 33000) return 0; // TODO: remove
-	//printf("### freshDataSize = %zd\n", freshDataSize);
-	if(!ctx->icyHeaderDone)
+	if(ctx->icyHeaderDone != WRC_ICY_HEADER_DONE)
 	{
-		addToHeaderBuffer(ctx, freshData, remDataSize);
-
-		char* headerEnd = memmem(ctx->headerBuf, ctx->headerBufAfterEndIdx, "\r\n\r\n", 4);
-
-		if(headerEnd == NULL)
+		if(ctx->icyHeaderDone == WRC_ICY_UNDECIDED)
 		{
-			return freshDataSize;
+			// this should only happen with the very first data received
+			if(memcmp(freshData, "ICY 200 OK", strlen("ICY 200 OK")) == 0)
+			{
+				ctx->icyHeaderDone = WRC_ICY_HEADER_IN_BODY;
+			}
+			else
+			{
+				// header is not in body, just play the stream-
+				// TODO: the header data is in the http header, we could extract
+				//       it from there and save info to ctx
+				ctx->icyHeaderDone = WRC_ICY_HEADER_DONE;
+			}
 		}
+		if(ctx->icyHeaderDone == WRC_ICY_HEADER_IN_BODY)
+		{
+			char* headerEnd = memmem(remData, remDataSize, "\r\n\r\n", 4);
+			const int bufSize = sizeof(ctx->headerBuf);
+			size_t headerDataSize = remDataSize;
 
-		parseIcyHeader(ctx);
+			if(headerEnd != NULL)
+			{
+				headerEnd += 4; // \r\n\r\n
+				headerDataSize = headerEnd - remData;
+			}
 
-		remData = memmem(freshData, freshDataSize, "\r\n\r\n", 4);
+			// -1 because I wanna leave one byte for \0-termination
+			int numBytes = min(headerDataSize, bufSize - ctx->headerBufAfterEndIdx - 1);
+			memcpy(ctx->headerBuf+ctx->headerBufAfterEndIdx, remData, numBytes);
+			ctx->headerBufAfterEndIdx += numBytes;
 
-		remData += 4; // \r\n\r\n
+			if(headerEnd == NULL)
+			{
+				return freshDataSize;
+			}
 
-		remDataSize -= remData - (char*)freshData;
+			// ok, headerEnd is not NULL, i.e. the whole header has been received.
+			ctx->icyHeaderDone = WRC_ICY_HEADER_DONE;
+			ctx->headerBuf[ctx->headerBufAfterEndIdx] = '\0';
+			parseInBodyIcyHeader(ctx);
+
+			remData = headerEnd; // \r\n\r\n
+
+			remDataSize -= headerDataSize;
+		}
 	}
 
 	if(remDataSize > 0)
