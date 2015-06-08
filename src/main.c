@@ -35,28 +35,159 @@ typedef struct _mp3streamContext
 	char headerBuf[8192];
 	int headerBufAfterEndIdx;
 
-	char mp3Buf[65536];
-	int mp3BufAfterEndIdx;
+	int  icyMetaInt;
+	// the metadata sent periodically, cannot be more than this
+	// two buffers to swap between them (metadata could be split up into multiple packets)
+	char icyMetadata[2][256*16];
+	char icyMetadataIdx; // 0 or 1 - the currently valid index, will write to the other one, then swap
+	int  icyMetaBytesMissing;
+	int  icyMetaBytesWritten;
+	int  dataReadSinceLastIcyMeta;
 
 	int sampleRate;
 	int numChannels;
 	// let's assume format is always 16bit int - but signed or unsigned, little or big endian?
 
+	char* icyName;
+	char* icyGenre;
+	char* icyURL;
+	char* icyDescription;
+
 	mpg123_handle* handle;
 
 	SDL_AudioDeviceID sdlAudioDevId;
-
-	size_t dataWritten; // TODO: remove
-
-	FILE* out;
 } mp3streamContext;
+
+static const char* skipBlanc(const char* str)
+{
+	while(*str == ' ' || *str == '\t')
+	{
+		++str;
+	}
+	return str;
+}
+
+// if the line starts with startsWith, returns pointer to the rest of line
+//    after startsWith and any spaces or tabs after that
+// if it doesn't start with that, returns NULL
+static const char* remLineIfStartsWith(const char* line, const char* startsWith)
+{
+	int prefixLen = strlen(startsWith);
+	if(strncasecmp(line, startsWith, prefixLen) == 0)
+	{
+		return skipBlanc(line + prefixLen);
+	}
+	return NULL;
+}
+
+// copies str to (excluding) strAfterEnd, but skips \0, \r and \n chars at the end
+static char* dupStr(const char* str, const char* strAfterEnd)
+{
+	const char* strEnd = strAfterEnd-1;
+	// skip \r and \n at the end of the string
+	while(*strEnd == '\r' || *strEnd == '\n') --strEnd;
+
+	size_t len = strEnd+1 - str; // strEnd+1 so strEnd itself is also copied
+
+	char* ret = (char*)malloc(len+1); // +1 for terminating \0
+	if(ret != NULL)
+	{
+		memcpy(ret, str, len);
+		ret[len] = '\0';
+	}
+	return ret;
+}
+
+// compare strings until next \r or \n (or \0) in str
+static int strCmpToNL(const char* str, const char* cmpStr)
+{
+	size_t len = strlen(cmpStr);
+	int startCmp = strncmp(str, cmpStr, len);
+
+	if(startCmp != 0) return startCmp;
+	// so the first len chars were equal.. if this is str's end, that's ok.
+	char nextC = str[len];
+	if(nextC == '\r' || nextC == '\n' || nextC == '\0')
+		return 0;
+	else
+		return 1;
+}
+
+
+
+static void handleHeaderLine(mp3streamContext* ctx, const char* line, size_t len)
+{
+	const char* lineAfterEnd = line+len;
+	const char* str;
+	if((str = remLineIfStartsWith(line, "content-type:")))
+	{
+		if(strCmpToNL(str, "audio/mpeg") == 0)
+		{
+			ctx->contentType = WRC_CONTENT_MP3;
+		}
+		else
+		{
+			ctx->contentType = WRC_CONTENT_UNKNOWN;
+			eprintf("## stream with unknown content type: %s\n", str);
+		}
+	}
+	else if((str = remLineIfStartsWith(line, "icy-name:")))
+	{
+		ctx->icyName = dupStr(str, lineAfterEnd);
+		printf("## icy-name:%s\n", ctx->icyName);
+	}
+	else if((str = remLineIfStartsWith(line, "icy-genre:")))
+	{
+		ctx->icyGenre = dupStr(str, lineAfterEnd);
+		printf("## icy-genre:%s\n", ctx->icyGenre);
+	}
+	else if((str = remLineIfStartsWith(line, "icy-url:")))
+	{
+		ctx->icyURL = dupStr(str, lineAfterEnd);
+		printf("## icy-url: \"%s\"\n", ctx->icyURL);
+	}
+	else if((str = remLineIfStartsWith(line, "icy-description:")))
+	{
+		ctx->icyDescription = dupStr(str, lineAfterEnd);
+		printf("## icy-description: %s\n", ctx->icyDescription);
+	}
+	else if((str = remLineIfStartsWith(line, "icy-metaint:")))
+	{
+		ctx->icyMetaInt = atoi(str);
+		printf("### metaint: %d\n", ctx->icyMetaInt);
+	}
+}
 
 static void parseInBodyIcyHeader(mp3streamContext* ctx)
 {
+	/*
+	ICY 200 OK
+	icy-notice1:<BR>This stream requires <a href="http://www.winamp.com/">Winamp</a><BR>
+	icy-notice2:SHOUTcast Distributed Network Audio Server/Linux v1.9.8<BR>
+	icy-name:WackenRadio.com - Official Wacken Radio by RauteMusik.FM
+	icy-genre:Metal Rock Alternative
+	icy-url:http://www.WackenRadio.com
+	content-type:audio/mpeg
+	icy-pub:1
+	icy-br:192
+	*/
 
-	printf("## header: %s\n", ctx->headerBuf);
+	//printf("## header: %s\n", ctx->headerBuf);
 
-	// TODO: parse the header, at least get "content-type:audio/mpeg"
+	size_t remsize = ctx->headerBufAfterEndIdx;
+	const char* headerEnd = ctx->headerBuf + remsize;
+
+	char* line = ctx->headerBuf;
+	char* lineEnd = memchr(line, '\r', remsize);
+
+	while(lineEnd && lineEnd <= headerEnd)
+	{
+		handleHeaderLine(ctx, line, lineEnd - line);
+
+		line = (lineEnd[1] == '\n') ? (lineEnd+2) : (lineEnd+1);
+		remsize = headerEnd - line;
+		lineEnd = memchr(line, '\r', remsize);
+	}
 }
 
 static int min(int a, int b) { return a < b ? a : b; }
@@ -79,6 +210,9 @@ static bool initMP3(mp3streamContext* ctx)
 		return false;
 	}
 
+	ctx->numChannels = 2;
+	ctx->sampleRate = 44100;
+
 	mpg123_open_feed(h);
 
 	SDL_PauseAudioDevice(ctx->sdlAudioDevId, 0);
@@ -88,22 +222,13 @@ static bool initMP3(mp3streamContext* ctx)
 
 static void playMP3(mp3streamContext* ctx, void* data, size_t size)
 {
-#if 0
-
-	const int bufSize = sizeof(ctx->mp3Buf);
-	// TODO: feed into mpg123 and call SDL with result
-
-	int copySize = min(bufSize - ctx->mp3BufAfterEndIdx, size);
-
-	memcpy(ctx->mp3Buf + ctx->mp3BufAfterEndIdx, data, copySize);
-	ctx->mp3BufAfterEndIdx += copySize;
-#endif // 0
-
 	byte decBuf[32768];
 
 	if(ctx->handle == NULL) initMP3(ctx);
 
 	assert(ctx->handle != NULL);
+
+	if(size == 0) return;
 
 	size_t decSize=0;
 	int mRet = mpg123_decode(ctx->handle, data, size, decBuf, sizeof(decBuf), &decSize);
@@ -135,8 +260,9 @@ static void playMP3(mp3streamContext* ctx, void* data, size_t size)
 static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* context)
 {
 	const size_t freshDataSize = size*nmemb;
-	size_t remDataSize = freshDataSize;
 	mp3streamContext* ctx = (mp3streamContext*)context;
+
+	size_t remDataSize = freshDataSize;
 
 	char* remData = freshData;
 
@@ -151,9 +277,8 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			}
 			else
 			{
-				// header is not in body, just play the stream-
-				// TODO: the header data is in the http header, we could extract
-				//       it from there and save info to ctx
+				// header is not in body, just play the stream.
+				// the metadata from the headers is received via the curlHeaderFun() callback.
 				ctx->icyHeaderDone = WRC_ICY_HEADER_DONE;
 			}
 		}
@@ -190,18 +315,95 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 		}
 	}
 
-	if(remDataSize > 0)
+	// TODO: metaint
+	if(ctx->icyMetaInt)
 	{
-		//fwrite(remData, remDataSize, 1, ctx->out);
-		playMP3(ctx, remData, remDataSize);
+		int dataToNextMeta = ctx->icyMetaInt - ctx->dataReadSinceLastIcyMeta;
+		if(ctx->icyMetaBytesMissing > 0)
+		{
+			char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
+			int writeMdBytes = min(remDataSize, ctx->icyMetaBytesMissing);
+			memcpy(mdBuf + ctx->icyMetaBytesWritten, remData, writeMdBytes);
+
+			remDataSize -= writeMdBytes;
+			remData += writeMdBytes;
+			ctx->icyMetaBytesMissing -= writeMdBytes;
+			ctx->icyMetaBytesWritten += writeMdBytes;
+			if(ctx->icyMetaBytesMissing == 0)
+			{
+				ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
+				ctx->dataReadSinceLastIcyMeta = 0;
+				ctx->icyMetaBytesWritten = 0;
+				printf("## MD update: %s\n", mdBuf);
+			}
+		}
+		else if(dataToNextMeta < remDataSize)
+		{
+			playMP3(ctx, remData, dataToNextMeta);
+			remData += dataToNextMeta;
+			remDataSize -= dataToNextMeta;
+			int numBytes = ((unsigned char*)remData)[0] * 16;
+
+			// skip the metadata length byte
+			++remData;
+			--remDataSize;
+
+			if(numBytes == 0)
+			{
+				// no new metadata this time, start counting again
+				ctx->dataReadSinceLastIcyMeta = 0;
+			}
+			else
+			{
+				char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
+				int writeMdBytes = min(remDataSize, numBytes);
+				memcpy(mdBuf, remData, writeMdBytes);
+
+				remDataSize -= writeMdBytes;
+				remData += writeMdBytes;
+				ctx->icyMetaBytesMissing = numBytes - writeMdBytes;
+				ctx->icyMetaBytesWritten = writeMdBytes;
+				if(ctx->icyMetaBytesMissing == 0)
+				{
+					ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
+					ctx->dataReadSinceLastIcyMeta = 0;
+					ctx->icyMetaBytesWritten = 0;
+					printf("## MD update2: %s\n", mdBuf);
+				}
+			}
+		}
+
+		ctx->dataReadSinceLastIcyMeta += remDataSize;
 	}
 
-	ctx->dataWritten += remDataSize;
+
+	playMP3(ctx, remData, remDataSize);
+
 
 	return freshDataSize;
 }
 
-static bool prepareCURL(const char* url, mp3streamContext* ctx)
+static size_t curlHeaderFun(char *buffer, size_t size, size_t nitems, void *userdata)
+{
+	/*
+	icy-br:128
+	ice-audio-info: bitrate=128;samplerate=44100;channels=2
+	icy-br:128
+	icy-description:Thrash Zone Radio la seule (...)
+	icy-genre:thrash
+	icy-name:ThrashZoneRadio
+	icy-pub:1
+	icy-url:http://www.thrash-zone.pcriot.com/
+	icy-metaint:16000
+	 */
+
+	size_t dataSize = size*nitems;
+	mp3streamContext* ctx = (mp3streamContext*)userdata;
+	handleHeaderLine(ctx, buffer, dataSize);
+	return dataSize;
+}
+
+static bool prepareCURL(mp3streamContext* ctx, const char* url)
 {
 	CURL* curl = curl_easy_init();
 
@@ -221,7 +423,7 @@ static bool prepareCURL(const char* url, mp3streamContext* ctx)
 
 	struct curl_slist* headers = NULL;
 
-	headers = curl_slist_append(headers, "Icy-MetaData:0"); // TODO: set to 1 for stream info
+	headers = curl_slist_append(headers, "Icy-MetaData:1"); // TODO: set to 1 for stream info
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1 );
@@ -233,10 +435,11 @@ static bool prepareCURL(const char* url, mp3streamContext* ctx)
 
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteFun);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curlHeaderFun);
+	curl_easy_setopt(curl, CURLOPT_WRITEHEADER, ctx);
 
 	ctx->curl = curl;
 	ctx->headers = headers;
-	//ctx->out = f;
 
 	return true;
 }
@@ -262,6 +465,7 @@ static bool execCurlRequest(mp3streamContext* ctx)
 
 static bool initSDLaudio(mp3streamContext* ctx)
 {
+	SDL_Init(SDL_INIT_AUDIO);
 	SDL_AudioSpec want, have;
 	SDL_AudioDeviceID dev;
 
@@ -284,6 +488,39 @@ static bool initSDLaudio(mp3streamContext* ctx)
 	return true;
 }
 
+static bool initContext(mp3streamContext* ctx, const char* url)
+{
+	if(mpg123_init() != MPG123_OK)
+	{
+		eprintf("Initializing libmpg123 failed!\n");
+		return false;
+	}
+
+	if(!initSDLaudio(ctx)) return false;
+
+	if(!prepareCURL(ctx, url)) return false;
+
+	return true;
+}
+
+static void closeContext(mp3streamContext* ctx)
+{
+	if(ctx->handle != NULL) mpg123_close(ctx->handle);
+
+	curl_easy_cleanup(ctx->curl);
+
+	free(ctx->icyName);
+	free(ctx->icyGenre);
+	free(ctx->icyURL);
+	free(ctx->icyDescription);
+
+	if(ctx->sdlAudioDevId != 0) SDL_CloseAudioDevice(ctx->sdlAudioDevId);
+
+	memset(ctx, 0 , sizeof(*ctx));
+
+	SDL_Quit();
+}
+
 int main(int argc, char** argv)
 {
 	if(argc < 2)
@@ -295,19 +532,11 @@ int main(int argc, char** argv)
 
 	mp3streamContext ctx = {0};
 
-	mpg123_init();
-
-	SDL_Init(SDL_INIT_AUDIO);
-	if(!initSDLaudio(&ctx)) return 1;
-
-	if(!prepareCURL(url, &ctx)) return 1;
+	if(!initContext(&ctx, url)) return 1;
 
 	execCurlRequest(&ctx);
 
-	//fclose(ctx.out);
-
-	SDL_CloseAudioDevice(ctx.sdlAudioDevId);
-	SDL_Quit();
+	closeContext(&ctx);
 
 	return 0;
 }
