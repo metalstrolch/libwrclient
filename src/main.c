@@ -2,121 +2,62 @@
 // build with gcc -std=c99 -ggdb -Wall -o wrclient  `/opt/sdl2/bin/sdl2-config --cflags` main.c \
 // `/opt/sdl2/bin/sdl2-config --libs` -lmpg123 -lcurl -lm -lvorbis -logg
 
+#include "internal.h"
 
-#include <string.h>
-#include <stdio.h>
-#include <stdbool.h>
 #include <assert.h>
 
-#include <curl/curl.h>
-#include <mpg123.h>
-#include <vorbis/codec.h>
+// TODO: some buffering before starting to decode?
 
-#include <SDL.h>
 
-#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+#include <SDL.h> // TODO: remove
 
-enum CONTENT_TYPE {
-	WRC_CONTENT_UNKNOWN = 0,
-	WRC_CONTENT_MP3,
-	WRC_CONTENT_OGGVORBIS,
-	// TODO: other formats?
-};
-
-enum ICY_HEADER_STATE {
-	WRC_ICY_UNDECIDED = 0,
-	WRC_ICY_HEADER_IN_BODY,
-	WRC_ICY_HEADER_DONE
-};
-
-enum OGG_DECODE_STATE {
-	WRC_OGGDEC_PREINIT = 0,
-	WRC_OGGDEC_VORBISINFO,
-	WRC_OGGDEC_COMMENT,
-	WRC_OGGDEC_SETUP,
-	WRC_OGGDEC_STREAMDEC
-};
-
-static const int oggBufSize = 4096;
-
-struct WRC__oggVorbisContext
+#ifdef _WIN32
+int WRC__vsnprintf(char *dst, size_t size, const char *format, va_list ap)
 {
-	ogg_sync_state   oy; // handles incoming data (bitstream)
-	ogg_page         og; // one Ogg page. ogg_packets containing the vorbis data are retrieved from this
-	ogg_stream_state os; // tracks decoding pages into packets
-	ogg_packet       op; // a single raw packet of data, passed to the (vorbis) codec
+	int ret = -1;
+	if(dst != NULL && size > 0)
+	{
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+		// I think MSVC2005 introduced _vsnprintf_s().
+		// this shuts up _vsnprintf() security/deprecation warnings.
+		ret = _vsnprintf_s(dst, size, _TRUNCATE, format, ap);
+#else
+		ret = _vsnprintf(dst, size, format, ap);
+		dst[size-1] = '\0'; // ensure '\0'-termination
+#endif
+	}
 
-	vorbis_info      vi; // contains basic information about the audio, from the vorbis headers
-	vorbis_comment   vc; // contains the info from the comment header (artist, title etc)
-	vorbis_dsp_state vd; // contains the state of the vorbis (packet to PCM) decoder
-	vorbis_block     vb; // local working space for packet->PCM decode
+	if(ret == -1)
+	{
+		// _vsnprintf() returns -1 if the output is truncated, real vsnprintf()
+		// returns the number of characters that would've been written..
+		// fortunately _vscprintf() calculates that.
+		ret = _vscprintf(format, ap);
+	}
 
-	enum OGG_DECODE_STATE state;
-	int maxBufSamplesPerChan;
-};
+	return ret;
+}
 
-typedef struct _musicStreamContext
+int WRC__snprintf(char *dst, size_t size, const char *format, ...)
 {
-	CURL* curl;
-	struct curl_slist* headers;
-	enum CONTENT_TYPE contentType;
-	char* contentTypeHeaderVal;
-	enum ICY_HEADER_STATE icyHeaderDone;
+	int ret = 0;
 
-	char headerBuf[8192];
-	int headerBufAfterEndIdx;
+	va_list argptr;
+	va_start( argptr, format );
 
-	int  icyMetaInt;
-	// the metadata sent periodically, cannot be more than this
-	// two buffers to swap between them (metadata could be split up into multiple packets)
-	char icyMetadata[2][256*16];
-	char icyMetadataIdx; // 0 or 1 - the currently valid index, will write to the other one, then swap
-	int  icyMetaBytesMissing;
-	int  icyMetaBytesWritten;
-	int  dataReadSinceLastIcyMeta;
+	ret = WRC__vsnprintf(dst, size, format, argptr);
 
-	int sampleRate;
-	int numChannels;
-	// let's assume format is always 16bit int - but signed or unsigned, little or big endian?
+	va_end( argptr );
 
-	char* icyName;
-	char* icyGenre;
-	char* icyURL;
-	char* icyDescription;
-
-	mpg123_handle* handle;
-
-	struct WRC__oggVorbisContext ogg;
-
-	SDL_AudioDeviceID sdlAudioDevId;
-
-	// function pointers for the implementation of the current format
-
-	// decode returns true if decoding was successful or it just needs more data
-	//    and false, if there was a non-recoverable error
-	bool (*decode)(struct _musicStreamContext* ctx, void* data, size_t size);
-	void (*shutdown)(struct _musicStreamContext* ctx);
-
-	// function pointers for callbacks to user-code, so the user can play the decoded music
-	// and display (changed) metadata etc
-
-	void* userdata; // this will be passed to the user-specified callbacks
-
-	// called whenever fresh samples are available
-	void (*playbackCB)(void* userdata, int16_t* samples, size_t numSamples);
-	// called on start and whenever samplerate or number of channels change
-	bool (*initAudioCB)(void* userdata, int sampleRate, int numChannels);
-
-	// TODO: callback for errors, callback(s?) for metadata
-
-} musicStreamContext;
-
+	return ret;
+}
+#endif // _WIN32
 
 static void* WRC__memmem(const void* haystack, size_t haystacklen, const void* needle, size_t needlelen)
 {
 	assert((haystack != NULL || haystacklen == 0)
 			&& (needle != NULL || needlelen == 0)
-			&& "Don't pass NULL into DG_memmem(), unless the corresponding len is 0!");
+			&& "Don't pass NULL into WRC__memmem(), unless the corresponding len is 0!");
 
 	unsigned char* h = (unsigned char*)haystack;
 	unsigned char* n = (unsigned char*)needle;
@@ -203,10 +144,12 @@ static int strCmpToNL(const char* str, const char* cmpStr)
 		return 1;
 }
 
-static bool playMP3(musicStreamContext* ctx, void* data, size_t size);
-static bool playOGG(musicStreamContext* ctx, void* data, size_t size);
+static bool decodeDummyFail(WRC_Stream* ctx, void* data, size_t size)
+{
+	return false;
+}
 
-static void handleHeaderLine(musicStreamContext* ctx, const char* line, size_t len)
+static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 {
 	const char* lineAfterEnd = line+len;
 	const char* str;
@@ -216,16 +159,17 @@ static void handleHeaderLine(musicStreamContext* ctx, const char* line, size_t l
 		if(strCmpToNL(str, "audio/mpeg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_MP3;
-			ctx->decode = playMP3;
+			ctx->decode = WRC__decodeMP3;
 		}
 		else if(strCmpToNL(str, "application/ogg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_OGGVORBIS;
-			ctx->decode = playOGG;
+			ctx->decode = WRC__decodeOGG;
 		}
 		else
 		{
 			ctx->contentType = WRC_CONTENT_UNKNOWN;
+			ctx->decode = decodeDummyFail; // this returns false so curlWriteFun() will abort
 			eprintf("## stream with unknown content type: %s\n", str);
 		}
 	}
@@ -256,7 +200,7 @@ static void handleHeaderLine(musicStreamContext* ctx, const char* line, size_t l
 	}
 }
 
-static void parseInBodyIcyHeader(musicStreamContext* ctx)
+static void parseInBodyIcyHeader(WRC_Stream* ctx)
 {
 	/*
 	ICY 200 OK
@@ -269,8 +213,6 @@ static void parseInBodyIcyHeader(musicStreamContext* ctx)
 	icy-pub:1
 	icy-br:192
 	*/
-
-	//printf("## header: %s\n", ctx->headerBuf);
 
 	size_t remsize = ctx->headerBufAfterEndIdx;
 	const char* headerEnd = ctx->headerBuf + remsize;
@@ -288,402 +230,30 @@ static void parseInBodyIcyHeader(musicStreamContext* ctx)
 	}
 }
 
-static int min(int a, int b) { return a < b ? a : b; }
-
-static void shutdownMP3(musicStreamContext* ctx)
-{
-	if(ctx->handle != NULL)
-	{
-		mpg123_close(ctx->handle);
-	}
-}
-
-static bool initMP3(musicStreamContext* ctx)
-{
-	mpg123_handle* h = mpg123_new(NULL, NULL);
-	ctx->handle = h;
-
-	if(h == NULL)
-	{
-		eprintf("WTF, mpg123_new() failed!\n");
-		return false;
-	}
-
-	mpg123_format_none(h);
-	if(mpg123_format(h, 44100, MPG123_STEREO, MPG123_ENC_SIGNED_16) != MPG123_OK)
-	{
-		eprintf("setting ouput format for mpg123 failed!\n");
-		return false;
-	}
-
-	ctx->numChannels = 2;
-	ctx->sampleRate = 44100;
-
-	ctx->shutdown = shutdownMP3;
-
-	mpg123_open_feed(h);
-
-	return true;
-}
-
-static bool playMP3(musicStreamContext* ctx, void* data, size_t size)
-{
-	unsigned char decBuf[32768];
-
-	if(ctx->handle == NULL && !initMP3(ctx))
-	{
-		return false;
-	}
-
-	if(size == 0) return true;
-
-	size_t decSize=0;
-	int mRet = mpg123_decode(ctx->handle, data, size, decBuf, sizeof(decBuf), &decSize);
-	if(mRet == MPG123_ERR)
-	{
-		eprintf("mpg123_decode failed: %s\n", mpg123_strerror(ctx->handle));
-		return true; // TODO: is there any chance the next try will succeed?
-	}
-
-	if(decSize != 0 && ctx->playbackCB != NULL)
-	{
-		ctx->playbackCB(ctx->userdata, (int16_t*)decBuf, decSize/sizeof(int16_t));
-	}
-
-	while(mRet != MPG123_ERR && mRet != MPG123_NEED_MORE)
-	{
-		// get as much decoded audio as available from last feed
-		mRet = mpg123_decode(ctx->handle, NULL, 0, decBuf, sizeof(decBuf), &decSize);
-		if(decSize != 0)
-		{
-			ctx->playbackCB(ctx->userdata, (int16_t*)decBuf, decSize/sizeof(int16_t));
-		}
-	}
-
-	/*
-	struct mpg123_frameinfo fi;
-	mpg123_info(ctx->handle, &fi);
-	printf("# bitrate: %d vbr: %d\n", fi.bitrate, fi.vbr);
-	*/
-	return true;
-}
-
-static void shutdownOGG(musicStreamContext* ctx)
-{
-	enum OGG_DECODE_STATE state = ctx->ogg.state;
-	if(state == WRC_OGGDEC_PREINIT)
-	{
-		// ogg support wasn't initialized, nothing to do here
-		return;
-	}
-
-	if(state == WRC_OGGDEC_STREAMDEC)
-	{
-		ogg_stream_clear(&ctx->ogg.os);
-	}
-	if(state > WRC_OGGDEC_COMMENT)
-	{
-		vorbis_comment_clear(&ctx->ogg.vc);
-	}
-	if(state > WRC_OGGDEC_SETUP)
-	{
-		vorbis_info_clear(&ctx->ogg.vi);
-	}
-	if(state > WRC_OGGDEC_PREINIT)
-	{
-		ogg_sync_clear(&ctx->ogg.oy);
-	}
-
-	ctx->ogg.state = WRC_OGGDEC_PREINIT;
-}
-
-static bool initOGG(musicStreamContext* ctx)
-{
-	ogg_sync_init(&ctx->ogg.oy);
-
-	ctx->ogg.state = WRC_OGGDEC_VORBISINFO;
-
-	ctx->shutdown = shutdownOGG;
-
-	return true;
-}
-
 // TODO: a reason enum? (errno-like)
-void WRC__errorReset(musicStreamContext* ctx, const char* format, ...)
+void WRC__errorReset(WRC_Stream* ctx, const char* format, ...)
 {
-	va_list argptr;
-	va_start( argptr, format );
-	// TODO: call some error/log callback
-	vfprintf(stderr, format, argptr);
-	va_end(argptr);
+	if(ctx->reportErrorCB != NULL)
+	{
+		char msgBuf[512];
+		msgBuf[0] = '\0';
+
+		va_list argptr;
+		va_start( argptr, format );
+
+		WRC__vsnprintf(msgBuf, sizeof(msgBuf), format, argptr);
+
+		va_end(argptr);
+
+		ctx->reportErrorCB(ctx->userdata, msgBuf);
+	}
 
 	ctx->shutdown(ctx);
 
-	exit(1); // TODO: do this properly, set some flag in ctx to abort download etc
+	ctx->streamState = WRC__STREAM_ABORT_ERROR;
 }
 
-static bool playOGG(musicStreamContext* ctx, void* data, size_t size)
-{
-	if(size == 0) return true;
-
-	if(ctx->ogg.state == WRC_OGGDEC_PREINIT) initOGG(ctx);
-
-	// these variable names are not very descriptive..
-	// but at least consistent with documentation (API docs + examples)
-	ogg_sync_state*   oy = &ctx->ogg.oy;
-	ogg_page*         og = &ctx->ogg.og;
-	ogg_stream_state* os = &ctx->ogg.os;
-	ogg_packet*       op = &ctx->ogg.op;
-
-	vorbis_info*      vi = &ctx->ogg.vi;
-	vorbis_comment*   vc = &ctx->ogg.vc;
-	vorbis_dsp_state* vd = &ctx->ogg.vd;
-	vorbis_block*     vb = &ctx->ogg.vb;
-
-
-	// whatever OGG_DECODE_STATE we're in, first add the current data to the internal buffer
-	char* buffer = ogg_sync_buffer(oy, size);
-	memcpy(buffer, data, size);
-	ogg_sync_wrote(oy, size);
-
-	// decode the first ogg-vorbis header: "vorbis stream initial header"
-	// from the first page that's transmitted
-	if(ctx->ogg.state == WRC_OGGDEC_VORBISINFO)
-	{
-		// get the first page, should contain the "vorbis stream initial header"
-		if(ogg_sync_pageout(oy, og) != 1)
-		{
-			// data for page missing, try again with more data later
-			return true;
-		}
-
-		// set up a logical stream with the serialno
-		ogg_stream_init(os, ogg_page_serialno(og));
-
-		vorbis_info_init(vi);
-		vorbis_comment_init(vc);
-
-		if(ogg_stream_pagein(os, og) < 0)
-		{
-			WRC__errorReset(ctx, "Error while reading first OGG page");
-			return false;
-		}
-
-		if(ogg_stream_packetout(os, op) != 1 || vorbis_synthesis_headerin(vi, vc, op) < 0)
-		{
-			WRC__errorReset(ctx, "Error while reading first OGG packet or vorbis header.");
-			return false;
-		}
-
-		// ok, now we're sure it's vorbis and the next packets are
-		// the comment- and the setup/codeboock-header
-
-		ctx->ogg.state = WRC_OGGDEC_COMMENT;
-	}
-
-	// the code to decode the next two headers - comment and setup/codebook - is identical
-	// so I put it in a loop, which basically loops over the pages from ogg_sync_pageout()
-	// until we're out of data or both headers are read.
-	while(ctx->ogg.state >= WRC_OGGDEC_COMMENT && ctx->ogg.state <= WRC_OGGDEC_SETUP)
-	{
-		int pageOutRes = ogg_sync_pageout(oy, og);
-		if(pageOutRes == 0)
-		{
-			// data for page missing, try again with more data later
-			return true;
-		}
-		else if(pageOutRes < 0)
-		{
-			// decoder_example.c jumps back to ogg_sync_pageout() again if this happens,
-			// so let's do that, too
-			continue;
-		}
-		// ok, pageOutRes is 1 at this point => was successful
-
-		ogg_stream_pagein(os, og);
-
-		// this loop iterates over packets from the current page of the outer loop
-		do {
-			int result = ogg_stream_packetout(os, op);
-			if(result < 0)
-			{
-				// data corrupted or missing - this mustn't happen while reading headers!
-				WRC__errorReset(ctx, "Corrupt Vorbis comment or info header!");
-				return false;
-			}
-			else if(result == 0)
-			{
-				// get next page (at beginning of outer loop)
-				break;
-			}
-
-			result = vorbis_synthesis_headerin(vi, vc, op);
-			if(result < 0)
-			{
-				WRC__errorReset(ctx, "Corrupt Vorbis comment or info header!");
-				return false;
-			}
-
-			ctx->ogg.state++; // go to next state
-
-		} while(ctx->ogg.state <= WRC_OGGDEC_SETUP);
-
-		if(ctx->ogg.state > WRC_OGGDEC_SETUP)
-		{
-			// we've parsed all three headers, so the actual vorbis stream
-			// decoder can be initialized
-			if(vorbis_synthesis_init(vd, vi) != 0)
-			{
-				WRC__errorReset(ctx, "vorbis_synthesis_init() failed!\n");
-				return false;
-			}
-
-			ctx->sampleRate = vi->rate;
-			ctx->numChannels = vi->channels;
-
-			ctx->ogg.maxBufSamplesPerChan = oggBufSize/vi->channels;
-
-			// TODO: replace this by something that makes sense
-			printf("# ogg vendor: %s\n## ogg comments:\n", (vc->vendor == NULL) ? "<NULL>" : vc->vendor);
-
-			for(int i=0; i<vc->comments; ++i)
-			{
-				if(vc->comment_lengths[i] > 0)
-				{
-					printf("### %s\n", vc->user_comments[i]);
-				}
-			}
-			// TODO: save other info from vi and vc somewhere
-
-			// re-initialize audio backend for new sampleRate/numChannels
-			ctx->initAudioCB(ctx->userdata, ctx->sampleRate, ctx->numChannels);
-
-			vorbis_block_init(vd, vb);
-		}
-	}
-
-	if(ctx->ogg.state == WRC_OGGDEC_STREAMDEC)
-	{
-		bool eos = false;
-		ogg_int16_t decBuf[oggBufSize];
-
-		// this loop iterates the pages in the current buffer/ogg_sync_state (oy)
-		while(!eos)
-		{
-			int res = ogg_sync_pageout(oy, og);
-
-			if(res == 0)
-			{
-				return true; // more data is needed for the page, try again later
-			}
-
-			if(res < 0)
-			{
-				// missing or corrupt data at this page position.. try next page
-				eprintf("Corrupt or missing data in bitstream; continuing...\n"); // TODO: I probably don't care much..
-				continue;
-			}
-
-			ogg_stream_pagein(os, og);
-
-			// this loop iterates the packets of the current page
-			for(;;)
-			{
-				res = ogg_stream_packetout(os, op);
-
-				if(res == 0)
-				{
-					// no more packets => break into outer loop to get next page
-					break;
-				}
-				else if(res < 0)
-				{
-					// we're out of sync, calling ogg_stream_packetout() again
-					// should fix it - so just continue
-					continue;
-				}
-
-				// we have a proper packet..
-
-				if(vorbis_synthesis(vb, op) == 0)
-				{
-					vorbis_synthesis_blockin(vd, vb);
-				}
-
-				// pcm contains one array per channel (=> vi->channels),
-				// so pcm[0] is the first channel, pcm[1] the second etc
-				// the samples are float values between -1.0f and 1.0f
-				float** pcm;
-				// the number of samples per channel in pcm
-				int samples;
-
-				// this loop iterates the samples in a packet
-				while( (samples = vorbis_synthesis_pcmout(vd, &pcm)) > 0 )
-				{
-					int numOutSamples = min(samples, ctx->ogg.maxBufSamplesPerChan);
-					int numChannels = vi->channels;
-
-					// convert floats to 16bit signed ints and interleave
-					for(int chanIdx=0; chanIdx < numChannels; ++chanIdx)
-					{
-						float* curChan = pcm[chanIdx];
-						ogg_int16_t* curOutSample = decBuf + chanIdx;
-
-						for(int sampleIdx=0; sampleIdx < numOutSamples; ++sampleIdx)
-						{
-							int sample = floor(curChan[sampleIdx]*32767.0f + 0.5f);
-
-							// prevent int overflows aka clipping
-							if(sample < -32768) // INT16_MIN
-							{
-								sample = -32768;
-							}
-							else if(sample > 32767) // INT16_MAX
-							{
-								sample = 32767;
-							}
-
-							*curOutSample = sample;
-							curOutSample += numChannels;
-						}
-					}
-
-					if(ctx->playbackCB != NULL)
-					{
-						ctx->playbackCB(ctx->userdata, decBuf, numOutSamples*numChannels);
-					}
-
-					// inform the vorbis decoder how many samples from last
-					// vorbis_synthesis_pcmout() were used
-					vorbis_synthesis_read(vd, numOutSamples);
-
-				} // end of samples-loop
-
-			} // end of packetout-loop
-
-			if(ogg_page_eos(og))
-			{
-				// this stream (probably: music track) is over.
-				// a second (next music track) may follow with its own headers
-				// (containing artist, title etc) and possibly different
-				// samplerate and channel count
-				eos=true;
-				// so we'll be back at the "receive first ogg header" state.
-				ctx->ogg.state = WRC_OGGDEC_VORBISINFO;
-
-				// clear the current stream and metadata, it'll be replaced
-				ogg_stream_clear(os);
-				vorbis_comment_clear(vc);
-				vorbis_info_clear(vi);  // decoder_example.c says, this must be called last
-			}
-
-		} // end of pageout-loop
-	}
-
-	return true;
-}
-
-static bool playMusic(musicStreamContext* ctx, void* data, size_t size)
+static bool decodeMusic(WRC_Stream* ctx, void* data, size_t size)
 {
 	if(ctx->decode != NULL)
 	{
@@ -693,32 +263,85 @@ static bool playMusic(musicStreamContext* ctx, void* data, size_t size)
 	return false;
 }
 
+static void sendStationInfo(WRC_Stream* ctx)
+{
+	if(ctx->stationInfoCB != NULL)
+	{
+		ctx->stationInfoCB(ctx->userdata, ctx->icyName, ctx->icyGenre, ctx->icyDescription, ctx->icyURL);
+	}
+}
+
+// strips crap from the icy metadata string from the periodic updates,
+// which looks like:
+// "StreamTitle='Norma Jean - Opposite Of Left And Wrong | WackenRadio.com';StreamUrl='';"
+// and then calls ctx->currentTitleCB(), if any
+static void stripIcyMetaBufAndTellUser(WRC_Stream* ctx, char* str)
+{
+	static const int bufLen = 256*16;
+
+	str[bufLen-1] = '\0'; // make sure it's terminated.
+
+	printf("## current title raw: %s\n", str);
+
+	char* streamTitleStart = strstr(str, "StreamTitle=\'");
+	char* streamTitleEnd = NULL;
+	if(streamTitleStart == NULL)
+	{
+		streamTitleStart = str;
+	}
+	else
+	{
+		streamTitleStart += strlen("StreamTitle=\'");
+	}
+
+	streamTitleEnd = strstr(streamTitleStart, "\';");
+	if(streamTitleEnd == NULL)
+	{
+		streamTitleEnd = str + strlen(str);
+	}
+
+	*streamTitleEnd = '\0'; // cut off "';"
+
+	if(ctx->currentTitleCB != NULL)
+	{
+		ctx->currentTitleCB(ctx->userdata, streamTitleStart);
+	}
+	printf("## current title: %s\n", streamTitleStart);
+}
+
 static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* context)
 {
 	const size_t freshDataSize = size*nmemb;
-	musicStreamContext* ctx = (musicStreamContext*)context;
+	WRC_Stream* ctx = (WRC_Stream*)context;
 
 	size_t remDataSize = freshDataSize;
 
 	char* remData = freshData;
 
-	if(ctx->icyHeaderDone != WRC_ICY_HEADER_DONE)
+	if(ctx->streamState >= WRC__STREAM_ABORT_GRACEFULLY)
 	{
-		if(ctx->icyHeaderDone == WRC_ICY_UNDECIDED)
+		// if this function doesn't return size*nmemb,
+		// cURL will assume an error and abort.
+		return 0;
+	}
+	else if(ctx->streamState < WRC__STREAM_MUSIC)
+	{
+		if(ctx->streamState == WRC__STREAM_FRESH)
 		{
 			// this should only happen with the very first data received
 			if(memcmp(freshData, "ICY 200 OK", strlen("ICY 200 OK")) == 0)
 			{
-				ctx->icyHeaderDone = WRC_ICY_HEADER_IN_BODY;
+				ctx->streamState = WRC__STREAM_ICY_HEADER_IN_BODY;
 			}
 			else
 			{
 				// header is not in body, just play the stream.
-				// the metadata from the headers is received via the curlHeaderFun() callback.
-				ctx->icyHeaderDone = WRC_ICY_HEADER_DONE;
+				// the metadata from the headers has been received via the curlHeaderFun() callback.
+				ctx->streamState = WRC__STREAM_MUSIC;
 			}
 		}
-		if(ctx->icyHeaderDone == WRC_ICY_HEADER_IN_BODY)
+
+		if(ctx->streamState == WRC__STREAM_ICY_HEADER_IN_BODY)
 		{
 			char* headerEnd = WRC__memmem(remData, remDataSize, "\r\n\r\n", 4);
 			const int bufSize = sizeof(ctx->headerBuf);
@@ -731,7 +354,7 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			}
 
 			// -1 because I wanna leave one byte for \0-termination
-			int numBytes = min(headerDataSize, bufSize - ctx->headerBufAfterEndIdx - 1);
+			int numBytes = WRC__min(headerDataSize, bufSize - ctx->headerBufAfterEndIdx - 1);
 			memcpy(ctx->headerBuf+ctx->headerBufAfterEndIdx, remData, numBytes);
 			ctx->headerBufAfterEndIdx += numBytes;
 
@@ -741,7 +364,7 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			}
 
 			// ok, headerEnd is not NULL, i.e. the whole header has been received.
-			ctx->icyHeaderDone = WRC_ICY_HEADER_DONE;
+			ctx->streamState = WRC__STREAM_MUSIC;
 			ctx->headerBuf[ctx->headerBufAfterEndIdx] = '\0';
 			parseInBodyIcyHeader(ctx);
 
@@ -749,15 +372,23 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 
 			remDataSize -= headerDataSize;
 		}
+
+		// tell the user about the station info via his callback
+		sendStationInfo(ctx);
+
+		if(ctx->playbackCB == NULL)
+		{
+			return 0; // abort stream - probably the user only wanted the metadata
+		}
 	}
 
-	if(ctx->icyMetaInt)
+	if(ctx->icyMetaInt != 0)
 	{
 		int dataToNextMeta = ctx->icyMetaInt - ctx->dataReadSinceLastIcyMeta;
 		if(ctx->icyMetaBytesMissing > 0)
 		{
 			char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
-			int writeMdBytes = min(remDataSize, ctx->icyMetaBytesMissing);
+			int writeMdBytes = WRC__min(remDataSize, ctx->icyMetaBytesMissing);
 			memcpy(mdBuf + ctx->icyMetaBytesWritten, remData, writeMdBytes);
 
 			remDataSize -= writeMdBytes;
@@ -766,15 +397,15 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			ctx->icyMetaBytesWritten += writeMdBytes;
 			if(ctx->icyMetaBytesMissing == 0)
 			{
+				stripIcyMetaBufAndTellUser(ctx, mdBuf);
 				ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
 				ctx->dataReadSinceLastIcyMeta = 0;
 				ctx->icyMetaBytesWritten = 0;
-				printf("## MD update: %s\n", mdBuf);
 			}
 		}
 		else if(dataToNextMeta < remDataSize)
 		{
-			if(!playMusic(ctx, remData, dataToNextMeta))
+			if(!decodeMusic(ctx, remData, dataToNextMeta))
 			{
 				// there was an error, abort downloading stream
 				return 0;
@@ -796,7 +427,7 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			else
 			{
 				char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
-				int writeMdBytes = min(remDataSize, numBytes);
+				int writeMdBytes = WRC__min(remDataSize, numBytes);
 				memcpy(mdBuf, remData, writeMdBytes);
 
 				remDataSize -= writeMdBytes;
@@ -805,10 +436,10 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 				ctx->icyMetaBytesWritten = writeMdBytes;
 				if(ctx->icyMetaBytesMissing == 0)
 				{
+					stripIcyMetaBufAndTellUser(ctx, mdBuf);
 					ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
 					ctx->dataReadSinceLastIcyMeta = 0;
 					ctx->icyMetaBytesWritten = 0;
-					printf("## MD update2: %s\n", mdBuf);
 				}
 			}
 		}
@@ -817,12 +448,11 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 	}
 
 
-	if(!playMusic(ctx, remData, remDataSize))
+	if(!decodeMusic(ctx, remData, remDataSize))
 	{
 		// there was an error, abort download
 		return 0;
 	}
-
 
 	return freshDataSize;
 }
@@ -842,12 +472,12 @@ static size_t curlHeaderFun(char *buffer, size_t size, size_t nitems, void *user
 	 */
 
 	size_t dataSize = size*nitems;
-	musicStreamContext* ctx = (musicStreamContext*)userdata;
+	WRC_Stream* ctx = (WRC_Stream*)userdata;
 	handleHeaderLine(ctx, buffer, dataSize);
 	return dataSize;
 }
 
-static bool prepareCURL(musicStreamContext* ctx, const char* url)
+static bool prepareCURL(WRC_Stream* ctx)
 {
 	CURL* curl = curl_easy_init();
 
@@ -856,20 +486,12 @@ static bool prepareCURL(musicStreamContext* ctx, const char* url)
 		eprintf("Initializing cURL failed!\n");
 		return false;
 	}
-#if 0
-	FILE* f = fopen("/tmp/test.dat", "w");
-	if(f == NULL)
-	{
-		eprintf("Couldn't open test file\n");
-		return false;
-	}
-#endif // 0
 
 	struct curl_slist* headers = NULL;
 
 	headers = curl_slist_append(headers, "Icy-MetaData:1");
 
-	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_URL, ctx->url);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1 );
 	curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
 	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
@@ -888,7 +510,7 @@ static bool prepareCURL(musicStreamContext* ctx, const char* url)
 	return true;
 }
 
-static bool execCurlRequest(musicStreamContext* ctx)
+static bool execCurlRequest(WRC_Stream* ctx)
 {
 	CURLcode res = curl_easy_perform(ctx->curl);
 
@@ -900,31 +522,233 @@ static bool execCurlRequest(musicStreamContext* ctx)
 
 	if(res != CURLE_OK)
 	{
-		eprintf("Downloading failed, cURL error: %s\n", curl_easy_strerror(res));
+		if(ctx->streamState < WRC__STREAM_ABORT_GRACEFULLY)
+		{
+			// probably an error while connecting, might be worth reporting
+			WRC__errorReset(ctx, "Downloading failed, cURL error: %s\n", curl_easy_strerror(res));
+		}
 		return false;
 	}
 
 	return true;
 }
 
-static void playbackCB_SDL(void* userdata, int16_t* samples, size_t numSamples)
+#define WRC_CTX_FREE(x) free(ctx->x); ctx->x = NULL;
+
+static void resetStream(WRC_Stream* ctx)
 {
-	musicStreamContext* ctx = userdata;
-
-	size_t decSize = numSamples*sizeof(int16_t);
-
-	if(SDL_QueueAudio(ctx->sdlAudioDevId, samples, decSize) != 0)
+	// basically, we wanna clear everything except for the URL and the user supplied callbacks
+	if(ctx->curl != NULL)
 	{
-		eprintf("SDL_QueueAudio(%d, buf, %zd) failed: %s\n", ctx->sdlAudioDevId, decSize, SDL_GetError());
+		curl_easy_cleanup(ctx->curl);
+		ctx->curl = NULL;
+
+		// the header are already taken care of in execCurlRequest()
+	}
+	ctx->contentType = WRC_CONTENT_UNKNOWN;
+	WRC_CTX_FREE(contentTypeHeaderVal);
+
+	if(ctx->shutdown != NULL)
+	{
+		ctx->shutdown(ctx);
+		ctx->shutdown = NULL;
+	}
+
+	ctx->streamState = WRC__STREAM_FRESH;
+
+	memset(ctx->headerBuf, 0, sizeof(ctx->headerBuf));
+	ctx->headerBufAfterEndIdx = 0;
+
+	ctx->icyMetaInt = 0;
+	memset(ctx->icyMetadata, 0, sizeof(ctx->icyMetadata));
+	ctx->icyMetadataIdx = 0;
+	ctx->icyMetaBytesMissing = 0;
+	ctx->icyMetaBytesWritten = 0;
+	ctx->dataReadSinceLastIcyMeta = 0;
+
+	ctx->sampleRate = 44100;
+	ctx->numChannels = 2;
+
+	WRC_CTX_FREE(icyName);
+	WRC_CTX_FREE(icyGenre);
+	WRC_CTX_FREE(icyURL);
+	WRC_CTX_FREE(icyDescription);
+
+	ctx->decode = NULL;
+
+	// the rest is userdata, which can remain as it is
+}
+
+#undef WRC_CTX_FREE
+
+
+
+// Sets up global internal stuff - call this *once* before using the library
+// (after loading it or on startup of your application or whatever)
+// Returns 1 on success, 0 on error
+int WRC_Init()
+{
+#ifdef WRC_MP3
+	if(mpg123_init() != MPG123_OK)
+	{
+		eprintf("Initializing libmpg123 failed!\n");
+		return 0;
+	}
+#endif // WRC_MP3
+	return 1;
+}
+
+// Clears global internal stuff - call this *once* before unloading the library
+// or before shutting down your application
+void WRC_Shutdown()
+{
+#ifdef WRC_MP3
+	mpg123_exit();
+#endif // WRC_MP3
+}
+
+// Creates/prepares a new stream for the given URL, but doesn't start streaming.
+// Actual streaming will be started when you call WRC_StartStreaming() with the returned stream.
+// * url: The URL to connect to (*not* a playlist, but the actual http stream,
+//        usually *from* a playlist, i.e. you need to parse playlists yourself!)
+// * playbackFn: This callback will be called to send you decoded audio samples from the stream,
+//               in the format last told you through the initAudioFn callback
+//               Set this to NULL if you only want the station info metadata, but no actual music
+// * initAudioFn: This callback will be called to tell you about changes in the
+//                streams sameplerate or number of channels.
+//                Yes, this can actually happen during playback (e.g. when a new song starts)
+//                Only if you set playbackFn to NULL, this may be NULL, too.
+// * userdata: Will be passed to all your callbacks (including the metadata and error reporting ones!),
+//             so you can do with it whatever you want. May be NULL.
+// Returns NULL on error, otherwise a WRC_Stream object.
+WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
+                             WRC_initAudioCB initAudioFn, void* userdata)
+{
+	WRC_Stream* ret = calloc(1, sizeof(struct WRC__Stream));
+	if(ret == NULL)
+	{
+		eprintf("WRC_CreateStream(): Out of Memory!\n");
+		return NULL;
+	}
+
+	if(initAudioFn == NULL)
+	{
+		playbackFn = NULL;
+	}
+
+	int urlLen = strlen(url);
+	if(urlLen > sizeof(ret->url)-1)
+	{
+		eprintf("WRC_CreateStream(): URL too long!\n");
+		free(ret);
+		return NULL;
+	}
+
+	memcpy(ret->url, url, urlLen+1); // +1 to also copy terminating '\0'
+
+	ret->playbackCB = playbackFn;
+	ret->initAudioCB = initAudioFn;
+	ret->userdata = userdata;
+
+	// set default samplerate + number of channels
+	ret->sampleRate = 44100;
+	ret->numChannels = 2;
+
+	return ret;
+}
+
+// Set the callbacks for receiving metadata information for the given stream.
+// * stationInfoFn:  Will be called once after connecting to give you infos about
+//                   the web radio station, obtained from HTTP/ICY headers.
+// * currentTitleFn: Will be called whenever the streaming server sends updated
+//                   metadata for the currently played title
+// You probably want to set these before calling WRC_StartStreaming() - stationInfoFn
+// won't be called otherwise.
+// Either or both arguments may be NULL if you don't care about that kind of metadata.
+void WRC_SetMetadataCallbacks(WRC_Stream* stream, WRC_stationInfoCB stationInfoFn,
+                              WRC_currentTitleCB currentTitleFn)
+{
+	stream->stationInfoCB = stationInfoFn;
+	stream->currentTitleCB = currentTitleFn;
+}
+
+// If you set this callback, unrecoverable errors will be reported to you via reportErrorFn.
+void WRC_SetErrorReportingCallback(WRC_Stream* stream, WRC_reportErrorCB reportErrorFn)
+{
+	stream->reportErrorCB = reportErrorFn;
+}
+
+// Start streaming. Streams until you call WRC_StopStreaming(), so you probably
+// want to call this in a thread.
+// (Special case: If you passed NULL as playbackFn in WRC_CreateStream(), it returns
+//   right after connecting and calling the stationInfoFn() metadata callback)
+// Returns 0 when an error occurs (server not reachable, unsupported format, ...)
+// Returns 1 if there was no error and streaming stopped only because you called
+//   WRC_StopStreaming(). After that you may call WRC_StartStreaming() with the same
+//   stream again to connect to the same server again and start streaming again.
+int WRC_StartStreaming(WRC_Stream* stream)
+{
+	if(!prepareCURL(stream))
+	{
+		return 0;
+	}
+
+	int ret = execCurlRequest(stream);
+
+	if(stream->streamState == WRC__STREAM_ABORT_GRACEFULLY)
+	{
+		// ret might be 0 even if we tried to shut down gracefully - after all,
+		// curl assumes an error when the callback returns 0..
+		return 1;
+	}
+
+	resetStream(stream);
+
+	return ret;
+}
+
+// Stop the current stream by disconnecting from the server.
+// WRC_StartStreaming() will return shortly after you called this.
+void WRC_StopStreaming(WRC_Stream* stream)
+{
+	if(stream->streamState < WRC__STREAM_ABORT_GRACEFULLY)
+	{
+		stream->streamState = WRC__STREAM_ABORT_GRACEFULLY;
 	}
 }
 
-static bool initAudioCB_SDL(void* userdata, int sampleRate, int numChannels)
+// free()s all resources hold by the stream and the stream object itself.
+void WRC_CleanupStream(WRC_Stream* stream)
 {
-	musicStreamContext* ctx = userdata;
-	if(ctx->sdlAudioDevId != 0)
+	resetStream(stream);
+	free(stream);
+}
+
+
+
+
+// ###########################################################################
+// beneath here: test crap
+
+
+static void playbackCB_SDL(void* userdata, int16_t* samples, size_t numSamples)
+{
+	SDL_AudioDeviceID* dev = userdata;
+
+	size_t decSize = numSamples*sizeof(int16_t);
+
+	if(SDL_QueueAudio(*dev, samples, decSize) != 0)
 	{
-		SDL_CloseAudioDevice(ctx->sdlAudioDevId);
+		eprintf("SDL_QueueAudio(%d, buf, %zd) failed: %s\n", *dev, decSize, SDL_GetError());
+	}
+}
+
+static int initAudioCB_SDL(void* userdata, int sampleRate, int numChannels)
+{
+	SDL_AudioDeviceID* oldDev = userdata;
+	if(*oldDev != 0)
+	{
+		SDL_CloseAudioDevice(*oldDev);
 	}
 
 	SDL_AudioSpec want, have;
@@ -944,54 +768,30 @@ static bool initAudioCB_SDL(void* userdata, int sampleRate, int numChannels)
 		return false;
 	}
 
-	ctx->sdlAudioDevId = dev;
+	*oldDev = dev;
 
 	SDL_PauseAudioDevice(dev, 0);
 
 	return true;
 }
 
-static bool initContext(musicStreamContext* ctx, const char* url)
+static void stationInfoCB_SDL(void* userdata, const char* name, const char* genre, const char* description, const char* url)
 {
-	if(mpg123_init() != MPG123_OK)
-	{
-		eprintf("Initializing libmpg123 failed!\n");
-		return false;
-	}
-
-	// set default samplerate + number of channels
-	ctx->sampleRate = 44100;
-	ctx->numChannels = 2;
-
-	// TODO: remove this later (or get arguments from function arguments or something)
-	ctx->userdata = ctx;
-	ctx->playbackCB = playbackCB_SDL;
-	ctx->initAudioCB = initAudioCB_SDL;
-
-	ctx->initAudioCB(ctx->userdata, ctx->sampleRate, ctx->numChannels);
-
-	if(!prepareCURL(ctx, url)) return false;
-
-	return true;
+	printf("Station Info: \n");
+	printf("  Name: %s\n", name);
+	printf("  Genre: %s\n", genre);
+	printf("  Description: %s\n", description);
+	printf("  URL: %s\n", url);
 }
 
-static void closeContext(musicStreamContext* ctx)
+static void currentTitleCB_SDL(void* userdata, const char* currentTitle)
 {
-	if(ctx->shutdown != NULL)
-	{
-		ctx->shutdown(ctx);
-	}
+	printf("Updated Title: %s\n", currentTitle);
+}
 
-	curl_easy_cleanup(ctx->curl);
-
-	free(ctx->icyName);
-	free(ctx->icyGenre);
-	free(ctx->icyURL);
-	free(ctx->icyDescription);
-
-	if(ctx->sdlAudioDevId != 0) SDL_CloseAudioDevice(ctx->sdlAudioDevId);
-
-	memset(ctx, 0 , sizeof(*ctx));
+static void reportErrorCB_SDL(void* userdata, const char* errormsg)
+{
+	printf("ERROR: %s\n", errormsg);
 }
 
 int main(int argc, char** argv)
@@ -1003,14 +803,26 @@ int main(int argc, char** argv)
 	}
 	const char* url = argv[1];
 
-	musicStreamContext ctx = {0};
 	SDL_Init(SDL_INIT_AUDIO);
 
-	if(!initContext(&ctx, url)) return 1;
+	WRC_Init();
 
-	execCurlRequest(&ctx);
+	SDL_AudioDeviceID audioDev = 0;
+	WRC_Stream* stream = WRC_CreateStream(url, playbackCB_SDL, initAudioCB_SDL, &audioDev);
 
-	closeContext(&ctx);
+	WRC_SetMetadataCallbacks(stream, stationInfoCB_SDL,  currentTitleCB_SDL);
+
+	WRC_SetErrorReportingCallback(stream, reportErrorCB_SDL);
+
+	if(stream != NULL)
+	{
+		WRC_StartStreaming(stream);
+
+		if(audioDev != 0) SDL_CloseAudioDevice(audioDev);
+	}
+
+
+	WRC_Shutdown();
 
 	SDL_Quit();
 
