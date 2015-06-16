@@ -70,7 +70,7 @@ struct WRC__oggVorbisContext
 
 static inline int WRC__min(int a, int b) { return a < b ? a : b; }
 
-void WRC__errorReset(WRC_Stream* ctx, const char* format, ...);
+void WRC__errorReset(WRC_Stream* ctx, int errorCode, const char* format, ...);
 
 #ifdef _WIN32
 int WRC__vsnprintf(char *dst, size_t size, const char *format, va_list ap);

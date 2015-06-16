@@ -64,9 +64,9 @@ static void currentTitleCB_SDL(void* userdata, const char* currentTitle)
 	printf("Updated Title: %s\n", currentTitle);
 }
 
-static void reportErrorCB_SDL(void* userdata, const char* errormsg)
+static void reportErrorCB_SDL(void* userdata, int errorCode, const char* errormsg)
 {
-	printf("ERROR: %s\n", errormsg);
+	printf("ERROR %d: %s\n", errorCode, errormsg);
 }
 
 int main(int argc, char** argv)

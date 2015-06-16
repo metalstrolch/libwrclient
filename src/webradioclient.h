@@ -10,6 +10,17 @@
 struct WRC__Stream;
 typedef struct WRC__Stream WRC_Stream;
 
+enum
+{
+	WRC_ERR_NOERROR = 0,
+	WRC_ERR_UNAVAILABLE = 1, // can't connect to stream
+	WRC_ERR_UNSUPPORTED_FORMAT = 2, // not ogg or mp3
+	WRC_ERR_CORRUPT_STREAM = 3, // I received garbage
+	WRC_ERR_INIT_AUDIO_FAILED = 4, // the initAudio callback returned 0
+
+	WRC_ERR_GENERIC = 255 // some other error
+};
+
 // the following types are for callbacks provided by the user
 // void* userdata is the userdata provided to WRC_CreateStream()
 
@@ -30,7 +41,10 @@ typedef void (*WRC_stationInfoCB)(void* userdata, const char* name, const char* 
 typedef void (*WRC_currentTitleCB)(void* userdata, const char* currentTitle);
 
 // called when an unrecoverable error happens (server not reachable, stream in unsupported format, ...)
-typedef void (*WRC_reportErrorCB)(void* userdata, const char* errormsg); // TODO: error enum?
+// errorCode will be one of WRC_ERR_* from above
+typedef void (*WRC_reportErrorCB)(void* userdata, int errorCode, const char* errormsg);
+
+
 
 // Sets up global internal stuff - call this *once* before using the library
 // (after loading it or on startup of your application or whatever)

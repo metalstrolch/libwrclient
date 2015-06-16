@@ -5,6 +5,15 @@
 
 // TODO: some buffering before starting to decode?
 
+/*	Takes input from <src> and decodes into <dest>, which should be a buffer
+	large enough to hold <strlen(src) + 1> characters.
+
+	If <src> is <NULL>, input will be taken from <dest>, decoding
+	the entities in-place.
+
+	The function returns the length of the decoded string.
+*/
+size_t WRC__decode_html_entities_utf8(char *dest, const char *src);
 
 #ifdef _WIN32
 int WRC__vsnprintf(char *dst, size_t size, const char *format, va_list ap)
@@ -48,6 +57,7 @@ int WRC__snprintf(char *dst, size_t size, const char *format, ...)
 }
 #endif // _WIN32
 
+// search for needle in haystack (like strstr() for for data that might not be '\0'-terminated)
 static void* WRC__memmem(const void* haystack, size_t haystacklen, const void* needle, size_t needlelen)
 {
 	assert((haystack != NULL || haystacklen == 0)
@@ -107,7 +117,8 @@ static const char* remLineIfStartsWith(const char* line, const char* startsWith)
 }
 
 // copies str to (excluding) strAfterEnd, but skips \0, \r and \n chars at the end
-static char* dupStr(const char* str, const char* strAfterEnd)
+// also replaces html-encoding with proper UTF-8 (for umlauts etc)
+static char* copyDecodeHeaderStr(const char* str, const char* strAfterEnd)
 {
 	const char* strEnd = strAfterEnd-1;
 	// skip \r and \n at the end of the string
@@ -119,6 +130,8 @@ static char* dupStr(const char* str, const char* strAfterEnd)
 	if(ret != NULL)
 	{
 		memcpy(ret, str, len);
+		ret[len] = '\0';
+		WRC__decode_html_entities_utf8(ret, NULL);
 		ret[len] = '\0';
 	}
 	return ret;
@@ -150,13 +163,13 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 	const char* str;
 	if((str = remLineIfStartsWith(line, "content-type:")))
 	{
-		ctx->contentTypeHeaderVal = dupStr(str, lineAfterEnd);
+		ctx->contentTypeHeaderVal = copyDecodeHeaderStr(str, lineAfterEnd);
 		if(strCmpToNL(str, "audio/mpeg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_MP3;
 			ctx->decode = WRC__decodeMP3;
 		}
-		else if(strCmpToNL(str, "application/ogg") == 0)
+		else if(strCmpToNL(str, "application/ogg") == 0 || strCmpToNL(str, "audio/ogg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_OGGVORBIS;
 			ctx->decode = WRC__decodeOGG;
@@ -165,24 +178,24 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 		{
 			ctx->contentType = WRC_CONTENT_UNKNOWN;
 			ctx->decode = decodeDummyFail; // this returns false so curlWriteFun() will abort
-			eprintf("## stream with unknown content type: %s\n", str);
+			WRC__errorReset(ctx, WRC_ERR_UNSUPPORTED_FORMAT, "unknown content type: %s", str);
 		}
 	}
 	else if((str = remLineIfStartsWith(line, "icy-name:")))
 	{
-		ctx->icyName = dupStr(str, lineAfterEnd);
+		ctx->icyName = copyDecodeHeaderStr(str, lineAfterEnd);
 	}
 	else if((str = remLineIfStartsWith(line, "icy-genre:")))
 	{
-		ctx->icyGenre = dupStr(str, lineAfterEnd);
+		ctx->icyGenre = copyDecodeHeaderStr(str, lineAfterEnd);
 	}
 	else if((str = remLineIfStartsWith(line, "icy-url:")))
 	{
-		ctx->icyURL = dupStr(str, lineAfterEnd);
+		ctx->icyURL = copyDecodeHeaderStr(str, lineAfterEnd);
 	}
 	else if((str = remLineIfStartsWith(line, "icy-description:")))
 	{
-		ctx->icyDescription = dupStr(str, lineAfterEnd);
+		ctx->icyDescription = copyDecodeHeaderStr(str, lineAfterEnd);
 	}
 	else if((str = remLineIfStartsWith(line, "icy-metaint:")))
 	{
@@ -220,8 +233,7 @@ static void parseInBodyIcyHeader(WRC_Stream* ctx)
 	}
 }
 
-// TODO: a reason enum? (errno-like)
-void WRC__errorReset(WRC_Stream* ctx, const char* format, ...)
+void WRC__errorReset(WRC_Stream* ctx, int errCode, const char* format, ...)
 {
 	if(ctx->reportErrorCB != NULL)
 	{
@@ -235,10 +247,11 @@ void WRC__errorReset(WRC_Stream* ctx, const char* format, ...)
 
 		va_end(argptr);
 
-		ctx->reportErrorCB(ctx->userdata, msgBuf);
+		ctx->reportErrorCB(ctx->userdata, errCode, msgBuf);
 	}
 
-	ctx->shutdown(ctx);
+	if(ctx->shutdown != NULL)
+		ctx->shutdown(ctx);
 
 	ctx->streamState = WRC__STREAM_ABORT_ERROR;
 }
@@ -347,6 +360,7 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 
 			if(headerEnd == NULL)
 			{
+				// part of the header is still missing.. return now and wait for more data
 				return freshDataSize;
 			}
 
@@ -460,7 +474,13 @@ static size_t curlHeaderFun(char *buffer, size_t size, size_t nitems, void *user
 
 	size_t dataSize = size*nitems;
 	WRC_Stream* ctx = (WRC_Stream*)userdata;
-	handleHeaderLine(ctx, buffer, dataSize);
+	long respCode = 0;
+	curl_easy_getinfo(ctx->curl, CURLINFO_RESPONSE_CODE, &respCode);
+	if(respCode >= 200 && respCode < 300)
+	{
+		// don't parse headers of forwardings, errorpages etc
+		handleHeaderLine(ctx, buffer, dataSize);
+	}
 	return dataSize;
 }
 
@@ -512,7 +532,9 @@ static bool execCurlRequest(WRC_Stream* ctx)
 		if(ctx->streamState < WRC__STREAM_ABORT_GRACEFULLY)
 		{
 			// probably an error while connecting, might be worth reporting
-			WRC__errorReset(ctx, "Downloading failed, cURL error: %s\n", curl_easy_strerror(res));
+			// TODO: we could possibly use res to report different kinds of errors
+			//       (404, 403, domain not found, no server at that port, ...)
+			WRC__errorReset(ctx, WRC_ERR_UNAVAILABLE, "Downloading failed, cURL error: %s\n", curl_easy_strerror(res));
 		}
 		return false;
 	}

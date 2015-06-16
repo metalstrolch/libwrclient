@@ -35,8 +35,10 @@ static bool initMP3(WRC_Stream* ctx)
 
 	if(!ctx->initAudioCB(ctx->userdata, ctx->sampleRate, ctx->numChannels))
 	{
-		WRC__errorReset(ctx, "calling initAudioCB(userdata, %d, %d) failed - samplerate/numchannels not supported?!",
+		WRC__errorReset(ctx, WRC_ERR_INIT_AUDIO_FAILED,
+				"calling initAudioCB(userdata, %d, %d) failed - samplerate/numchannels not supported?!",
 				ctx->sampleRate, ctx->numChannels);
+
 		return false;
 	}
 

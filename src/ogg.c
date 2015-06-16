@@ -52,18 +52,28 @@ static void sendCurrentTitleToUser(WRC_Stream* ctx, const char* artist, const ch
 {
 	if(ctx->currentTitleCB != NULL)
 	{
-		char buf[512];
 		if(artist == NULL)
 		{
-			artist = "Unknown Artist";
+			if(title == NULL)
+			{
+				ctx->currentTitleCB(ctx->userdata, "???");
+			}
+			else
+			{
+				ctx->currentTitleCB(ctx->userdata, title);
+			}
 		}
-		if(title == NULL)
+		else if(title == NULL)
 		{
 			title = "Unknown Title";
+			ctx->currentTitleCB(ctx->userdata, artist);
 		}
-		WRC__snprintf(buf, sizeof(buf), "%s - %s", artist, title);
-
-		ctx->currentTitleCB(ctx->userdata, buf);
+		else
+		{
+			char buf[512];
+			WRC__snprintf(buf, sizeof(buf), "%s - %s", artist, title);
+			ctx->currentTitleCB(ctx->userdata, buf);
+		}
 	}
 }
 
@@ -113,13 +123,13 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 
 		if(ogg_stream_pagein(os, og) < 0)
 		{
-			WRC__errorReset(ctx, "Error while reading first OGG page");
+			WRC__errorReset(ctx, WRC_ERR_UNSUPPORTED_FORMAT, "Error while reading first OGG page (probably not ogg/vorbis)");
 			return false;
 		}
 
 		if(ogg_stream_packetout(os, op) != 1 || vorbis_synthesis_headerin(vi, vc, op) < 0)
 		{
-			WRC__errorReset(ctx, "Error while reading first OGG packet or vorbis header.");
+			WRC__errorReset(ctx, WRC_ERR_UNSUPPORTED_FORMAT, "Error while reading first OGG packet or vorbis header (probably not ogg/vorbis)");
 			return false;
 		}
 
@@ -156,7 +166,7 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 			if(result < 0)
 			{
 				// data corrupted or missing - this mustn't happen while reading headers!
-				WRC__errorReset(ctx, "Corrupt Vorbis comment or info header!");
+				WRC__errorReset(ctx, WRC_ERR_CORRUPT_STREAM, "Corrupt Vorbis comment or info header!");
 				return false;
 			}
 			else if(result == 0)
@@ -168,7 +178,7 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 			result = vorbis_synthesis_headerin(vi, vc, op);
 			if(result < 0)
 			{
-				WRC__errorReset(ctx, "Corrupt Vorbis comment or info header!");
+				WRC__errorReset(ctx, WRC_ERR_CORRUPT_STREAM, "Corrupt Vorbis comment or info header!");
 				return false;
 			}
 
@@ -182,7 +192,7 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 			// decoder can be initialized
 			if(vorbis_synthesis_init(vd, vi) != 0)
 			{
-				WRC__errorReset(ctx, "vorbis_synthesis_init() failed!\n");
+				WRC__errorReset(ctx, WRC_ERR_CORRUPT_STREAM, "vorbis_synthesis_init() failed!\n");
 				return false;
 			}
 
@@ -200,8 +210,9 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 				// re-initialize audio backend for new sampleRate/numChannels
 				if(!ctx->initAudioCB(ctx->userdata, ctx->sampleRate, ctx->numChannels))
 				{
-					WRC__errorReset(ctx, "calling initAudioCB(userdata, %d, %d) failed - samplerate/numchannels not supported?!",
-					                ctx->sampleRate, ctx->numChannels);
+					WRC__errorReset(ctx, WRC_ERR_INIT_AUDIO_FAILED,
+							"calling initAudioCB(userdata, %d, %d) failed - samplerate/numchannels not supported?!",
+							ctx->sampleRate, ctx->numChannels);
 
 					return false;
 				}
