@@ -164,17 +164,22 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 	if((str = remLineIfStartsWith(line, "content-type:")))
 	{
 		ctx->contentTypeHeaderVal = copyDecodeHeaderStr(str, lineAfterEnd);
+#ifdef WRC_MP3
 		if(strCmpToNL(str, "audio/mpeg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_MP3;
 			ctx->decode = WRC__decodeMP3;
 		}
-		else if(strCmpToNL(str, "application/ogg") == 0 || strCmpToNL(str, "audio/ogg") == 0)
+		else
+#endif // WRC_MP3
+#ifdef WRC_OGG
+		if(strCmpToNL(str, "application/ogg") == 0 || strCmpToNL(str, "audio/ogg") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_OGGVORBIS;
 			ctx->decode = WRC__decodeOGG;
 		}
 		else
+#endif // WRC_OGG
 		{
 			ctx->contentType = WRC_CONTENT_UNKNOWN;
 			ctx->decode = decodeDummyFail; // this returns false so curlWriteFun() will abort
@@ -729,6 +734,9 @@ void WRC_StopStreaming(WRC_Stream* stream)
 // free()s all resources hold by the stream and the stream object itself.
 void WRC_CleanupStream(WRC_Stream* stream)
 {
-	resetStream(stream);
-	free(stream);
+	if(stream != NULL)
+	{
+		resetStream(stream);
+		free(stream);
+	}
 }

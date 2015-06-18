@@ -6,6 +6,10 @@
 #include <stddef.h> // size_t
 #include <stdint.h> // int16_t
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // the details of the struct are private, it'll only be passed around by pointer
 struct WRC__Stream;
 typedef struct WRC__Stream WRC_Stream;
@@ -101,5 +105,9 @@ void WRC_StopStreaming(WRC_Stream* stream);
 
 // free()s all resources hold by the stream and the stream object itself.
 void WRC_CleanupStream(WRC_Stream* stream);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif /* SRC_WEBRADIOCLIENT_H_ */

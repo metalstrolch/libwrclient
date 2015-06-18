@@ -2,8 +2,6 @@
 
 #ifdef WRC_OGG
 
-static const int oggBufSize = 4096;
-
 static void shutdownOGG(WRC_Stream* ctx)
 {
 	enum WRC__OGG_DECODE_STATE state = ctx->ogg.state;
@@ -205,7 +203,7 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 			{
 				ctx->sampleRate = vi->rate;
 				ctx->numChannels = vi->channels;
-				ctx->ogg.maxBufSamplesPerChan = oggBufSize/vi->channels;
+				ctx->ogg.maxBufSamplesPerChan = WRC__decBufSize/vi->channels;
 
 				// re-initialize audio backend for new sampleRate/numChannels
 				if(!ctx->initAudioCB(ctx->userdata, ctx->sampleRate, ctx->numChannels))
@@ -225,7 +223,7 @@ bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size)
 	if(ctx->ogg.state == WRC_OGGDEC_STREAMDEC)
 	{
 		bool eos = false;
-		ogg_int16_t decBuf[oggBufSize];
+		ogg_int16_t decBuf[WRC__decBufSize];
 
 		// this loop iterates the pages in the current buffer/ogg_sync_state (oy)
 		while(!eos)

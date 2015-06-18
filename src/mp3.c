@@ -49,7 +49,7 @@ static bool initMP3(WRC_Stream* ctx)
 
 bool WRC__decodeMP3(WRC_Stream* ctx, void* data, size_t size)
 {
-	unsigned char decBuf[32768];
+	unsigned char decBuf[WRC__decBufSize*sizeof(int16_t)];
 
 	if(ctx->handle == NULL && !initMP3(ctx))
 	{

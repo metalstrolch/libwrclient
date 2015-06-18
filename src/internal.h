@@ -39,6 +39,10 @@ enum WRC__OGG_DECODE_STATE {
 	WRC_OGGDEC_STREAMDEC
 };
 
+// number of samples in the temporary decoding buffer that is then passed to WRC_playbackCB()
+// => not more than WRC__decBufSize samples will be sent to the user at once
+static const int WRC__decBufSize = 4096;
+
 #ifdef WRC_MP3
 #include <mpg123.h>
 
