@@ -21,10 +21,6 @@ if os.is("windows") then -- MSVC flags
 COMMON_CFLAGS = {
 	-- TODO: common MSVC flags
 }
-
-COMMON_CXXFLAGS = {
-	-- TODO: C++ MSVC flags (if any)
-}
 else -- GCC/Clang flags for both OSX and Linux
 COMMON_CFLAGS = {
 	"-pthread",
@@ -172,7 +168,6 @@ solution "webradioclient"
 		}
 
 	configuration { "macosx" }
-		-- TODO: really no difference between C/C++?
 		buildoptions( concatLists( COMMON_CFLAGS,
 			{ "-x objective-c++",
 			  "-fno-exceptions",
@@ -302,8 +297,6 @@ project "mylibmpg123"
 	configuration { "vs*" }
 		defines
 		{
-			-- I need M_PI from math.h
-			--"_USE_MATH_DEFINES"
 			"WIN32"
 		}
 		excludes
@@ -398,6 +391,7 @@ project "libwrclient"
 			"curl"
 		}
 	
+	--[[ let's just use system libcurl.so, we can still bundle a custom libcurl.so with the game
 	configuration { "linux", "x64" }
 		includedirs
 		{
@@ -417,3 +411,4 @@ project "libwrclient"
 		{
 			"../linux32libs/lib/" -- for curl
 		}
+		]]

@@ -4,8 +4,9 @@ CC=gcc
 
 set -x
 
-$CC -std=gnu99 -ggdb -Wall -shared -fPIC -o libwrclient.so -Ilinux64libs/include/ \
-	src/main.c src/ogg.c src/mp3.c src/decode_html_ents.c -lm \
+$CC -std=gnu99 -ggdb -Wall -shared -fPIC -o libwrclient.so \
+	-Ilibsrc/libogg/include/ -Ilibsrc/libvorbis/include/ -Ilibsrc/mpg123/src/libmpg123/ \
+	src/main.c src/ogg.c src/mp3.c src/decode_html_ents.c -lm -lcurl \
 	libsrc/libogg/src/bitwise.c libsrc/libogg/src/framing.c \
 	libsrc/libvorbis/lib/mdct.c libsrc/libvorbis/lib/smallft.c \
 	libsrc/libvorbis/lib/block.c libsrc/libvorbis/lib/envelope.c \
@@ -42,5 +43,4 @@ $CC -std=gnu99 -ggdb -Wall -shared -fPIC -o libwrclient.so -Ilinux64libs/include
 	libsrc/mpg123/src/libmpg123/synth.c \
 	libsrc/mpg123/src/libmpg123/synth_real.c \
 	libsrc/mpg123/src/libmpg123/synth_s32.c \
-	libsrc/mpg123/src/libmpg123/tabinit.c \
-	linux64libs/lib/libcurl.a
+	libsrc/mpg123/src/libmpg123/tabinit.c
