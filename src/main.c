@@ -384,7 +384,9 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 
 		if(ctx->playbackCB == NULL)
 		{
-			return 0; // abort stream - probably the user only wanted the metadata
+			// abort stream gracefully - probably the user only wanted the metadata
+			ctx->streamState = WRC__STREAM_ABORT_GRACEFULLY;
+			return 0;
 		}
 	}
 
