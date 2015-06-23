@@ -345,6 +345,10 @@ project "libwrclient"
 		-- TODO: this sucks, maybe copy the headers to some include dir
 		"../libsrc/mpg123/src/libmpg123/",
 	}
+	defines
+	{
+		"WRC__COMPILING_LIB"
+	}
 	
 	links
 	{
