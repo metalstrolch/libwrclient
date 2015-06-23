@@ -16,6 +16,11 @@
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__) // TODO: remove
 
+#ifdef _WIN32
+#define inline __inline
+#define strncasecmp _strnicmp
+#endif
+
 enum WRC__CONTENT_TYPE {
 	WRC_CONTENT_UNKNOWN = 0,
 	WRC_CONTENT_MP3,
@@ -41,7 +46,8 @@ enum WRC__OGG_DECODE_STATE {
 
 // number of samples in the temporary decoding buffer that is then passed to WRC_playbackCB()
 // => not more than WRC__decBufSize samples will be sent to the user at once
-static const int WRC__decBufSize = 4096;
+//static const int WRC__decBufSize = 4096;
+#define WRC__decBufSize 4096
 
 #ifdef WRC_MP3
 #include <mpg123.h>

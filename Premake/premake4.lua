@@ -239,6 +239,13 @@ project "mylibvorbis"
 		"../libsrc/libvorbis/include/",
 	}
 	
+	configuration { "vs*" }
+		defines
+		{
+			-- I need M_PI from math.h
+			"_USE_MATH_DEFINES"
+		}
+	
 	configuration { "linux" }
 		targetprefix "lib"
 		buildoptions
@@ -292,6 +299,18 @@ project "mylibmpg123"
 		"OPT_GENERIC"
 	}
 	
+	configuration { "vs*" }
+		defines
+		{
+			-- I need M_PI from math.h
+			--"_USE_MATH_DEFINES"
+			"WIN32"
+		}
+		excludes
+		{
+			"../libsrc/mpg123/src/libmpg123/lfs_alias.c",
+		}
+	
 	configuration { "linux" }
 		targetprefix "lib"
 		buildoptions
@@ -329,7 +348,6 @@ project "libwrclient"
 	
 	links
 	{
-		"curl",
 		"mylibogg",
 		"mylibvorbis",
 		"mylibmpg123",
@@ -337,11 +355,43 @@ project "libwrclient"
 	
 	targetdir ".."
 	
+	configuration { "vs*", "x32" }
+		includedirs
+		{
+			"../win32libs/include/" -- for curl
+		}
+		libdirs
+		{
+			"../win32libs/lib/" -- for curl
+		}
+		links
+		{
+			"libcurl"
+		}
+	
+	configuration { "vs*", "x64" }
+		includedirs
+		{
+			"../win64libs/include/" -- for curl
+		}
+		libdirs
+		{
+			"../win64libs/lib/" -- for curl
+		}
+		links
+		{
+			"libcurl"
+		}
+	
 	configuration { "linux" }
 		targetprefix "lib"
 		buildoptions
 		{
 			"-std=gnu99",
+		}
+		links
+		{
+			"curl"
 		}
 	
 	configuration { "linux", "x64" }
