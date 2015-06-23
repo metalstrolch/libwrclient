@@ -3,3 +3,8 @@
 *.o
 *.lo
 *.la
+/Premake/obj/
+/Premake/*.make
+/Premake/Makefile
+/Premake/*.a
+/libwrclient.so

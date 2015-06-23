@@ -38,7 +38,7 @@ COMMON_CFLAGS = {
 	--"-Wmaybe-uninitialized",
 	
 	-- warnings we don't want
-	"-Wno-maybe-uninitialized",
+--	"-Wno-maybe-uninitialized",
 	"-Wno-switch",
 	"-Wno-multichar",
 	"-Wno-char-subscripts", -- TODO: sometimes run build without this to be sure
@@ -183,7 +183,7 @@ solution "webradioclient"
 		
 			"-fno-exceptions",
 			"-fno-rtti",
-		}	
+		}
 
 project "mylibogg"
 	targetname "libogg_static"
@@ -196,6 +196,10 @@ project "mylibogg"
 	files
 	{
 		"../libsrc/libogg/src/*.c"
+	}
+		includedirs
+	{
+		"../libsrc/libogg/include/",
 	}
 	
 	configuration { "linux" }
@@ -228,6 +232,11 @@ project "mylibvorbis"
 		-- TODO: if we wanna play vorbis files, vorbisfile.c (=> libvorbisfile)
 		--       might be handly
 		"../libsrc/libvorbis/lib/vorbisfile.c",
+	}
+		includedirs
+	{
+		"../libsrc/libogg/include/",
+		"../libsrc/libvorbis/include/",
 	}
 	
 	configuration { "linux" }
@@ -310,6 +319,13 @@ project "libwrclient"
 	{
 		"../src/sdl2client.c"
 	}
+	includedirs
+	{
+		"../libsrc/libogg/include/",
+		"../libsrc/libvorbis/include/",
+		-- TODO: this sucks, maybe copy the headers to some include dir
+		"../libsrc/mpg123/src/libmpg123/",
+	}
 	
 	links
 	{
@@ -326,4 +342,24 @@ project "libwrclient"
 		buildoptions
 		{
 			"-std=gnu99",
+		}
+	
+	configuration { "linux", "x64" }
+		includedirs
+		{
+			"../linux64libs/include/" -- for curl
+		}
+		libdirs
+		{
+			"../linux64libs/lib/" -- for curl
+		}
+	configuration { "linux", "x32" }
+		-- TODO: those dirs don't actually exist yet
+		includedirs
+		{
+			"../linux32libs/include/" -- for curl
+		}
+		libdirs
+		{
+			"../linux32libs/lib/" -- for curl
 		}

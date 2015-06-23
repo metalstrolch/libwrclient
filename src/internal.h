@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
-
+#include <stdlib.h>
 #include <curl/curl.h>
 
 #define WRC_OGG 1
