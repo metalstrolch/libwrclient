@@ -6,6 +6,16 @@
 #include <stddef.h> // size_t
 #include <stdint.h> // int16_t
 
+#ifdef _WIN32
+	#ifdef WRC__COMPILING_LIB
+		#define WRC_EXTERN __declspec(dllexport)
+	#else // not compiling libwrclient => normal include of the header
+		#define WRC_EXTERN __declspec(dllimport)
+	#endif // WRC__COMPILING_LIB
+#else // not _WIN32 - nothing to do here
+	#define WRC_EXTERN
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,11 +63,11 @@ typedef void (*WRC_reportErrorCB)(void* userdata, int errorCode, const char* err
 // Sets up global internal stuff - call this *once* before using the library
 // (after loading it or on startup of your application or whatever)
 // Returns 1 on success, 0 on error
-int WRC_Init();
+WRC_EXTERN int WRC_Init();
 
 // Clears global internal stuff - call this *once* before unloading the library
 // or before shutting down your application
-void WRC_Shutdown();
+WRC_EXTERN void WRC_Shutdown();
 
 // Creates/prepares a new stream for the given URL, but doesn't start streaming.
 // Actual streaming will be started when you call WRC_StartStreaming() with the returned stream.
@@ -72,8 +82,8 @@ void WRC_Shutdown();
 //                If you set playbackFn to NULL, this may be NULL, too.
 // * userdata: Will be passed to all your callbacks (including the metadata and error reporting ones!),
 //             so you can do with it whatever you want. May be NULL.
-WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
-                             WRC_initAudioCB initAudioFn, void* userdata);
+WRC_EXTERN WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
+                                        WRC_initAudioCB initAudioFn, void* userdata);
 
 // Set the callbacks for receiving metadata information for the given stream.
 // * stationInfoFn:  Will be called once after connecting to give you infos about
@@ -83,11 +93,11 @@ WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
 // You probably want to set these before calling WRC_StartStreaming() - stationInfoFn
 // won't be called otherwise.
 // Either or both arguments may be NULL if you don't care about that kind of metadata.
-void WRC_SetMetadataCallbacks(WRC_Stream* stream, WRC_stationInfoCB stationInfoFn,
-                              WRC_currentTitleCB currentTitleFn);
+WRC_EXTERN void WRC_SetMetadataCallbacks(WRC_Stream* stream, WRC_stationInfoCB stationInfoFn,
+                                         WRC_currentTitleCB currentTitleFn);
 
 // If you set this callback, unrecoverable errors will be reported to you via reportErrorFn.
-void WRC_SetErrorReportingCallback(WRC_Stream* stream, WRC_reportErrorCB reportErrorFn);
+WRC_EXTERN void WRC_SetErrorReportingCallback(WRC_Stream* stream, WRC_reportErrorCB reportErrorFn);
 
 // Start streaming. Streams until you call WRC_StopStreaming(), so you probably
 // want to call this in a thread.
@@ -97,14 +107,14 @@ void WRC_SetErrorReportingCallback(WRC_Stream* stream, WRC_reportErrorCB reportE
 // Returns 1 if there was no error and streaming stopped only because you called
 //   WRC_StopStreaming(). After that you may call WRC_StartStreaming() with the same
 //   stream to connect to the same server again and start streaming again.
-int WRC_StartStreaming(WRC_Stream* stream);
+WRC_EXTERN int WRC_StartStreaming(WRC_Stream* stream);
 
 // Stop the current stream by disconnecting from the server.
 // WRC_StartStreaming() will return shortly after you called this.
-void WRC_StopStreaming(WRC_Stream* stream);
+WRC_EXTERN void WRC_StopStreaming(WRC_Stream* stream);
 
 // free()s all resources hold by the stream and the stream object itself.
-void WRC_CleanupStream(WRC_Stream* stream);
+WRC_EXTERN void WRC_CleanupStream(WRC_Stream* stream);
 
 #ifdef __cplusplus
 } // extern "C"
