@@ -390,8 +390,7 @@ project "libwrclient"
 		{
 			"curl"
 		}
-	
-	--[[ let's just use system libcurl.so, we can still bundle a custom libcurl.so with the game
+
 	configuration { "linux", "x64" }
 		includedirs
 		{
@@ -411,4 +410,3 @@ project "libwrclient"
 		{
 			"../linux32libs/lib/" -- for curl
 		}
-		]]

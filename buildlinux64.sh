@@ -4,9 +4,10 @@ CC=gcc
 
 set -x
 
-$CC -std=gnu99 -ggdb -Wall -shared -fPIC -o libwrclient.so \
+$CC -std=gnu99 -Os -Wall -shared -fPIC -o libwrclient.so \
 	-Ilibsrc/libogg/include/ -Ilibsrc/libvorbis/include/ -Ilibsrc/mpg123/src/libmpg123/ \
-	src/main.c src/ogg.c src/mp3.c src/decode_html_ents.c -lm -lcurl \
+	src/main.c src/ogg.c src/mp3.c src/decode_html_ents.c \
+	-L./linux64libs/lib/ -I./linux64libs/include/ -lcurl -lm \
 	libsrc/libogg/src/bitwise.c libsrc/libogg/src/framing.c \
 	libsrc/libvorbis/lib/mdct.c libsrc/libvorbis/lib/smallft.c \
 	libsrc/libvorbis/lib/block.c libsrc/libvorbis/lib/envelope.c \
