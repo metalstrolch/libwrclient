@@ -1,6 +1,8 @@
 libwrclient is a library that allows you to easily connect to a webradio stream
-and decode it.
-The project's website is https://github.com/MasterbrainBytes/libwrclient.  
+and decode it.  
+It was developed for (and is used by) [Cattle And Crops](https://www.cattleandcrops.com/)  
+The project's website is https://github.com/MasterbrainBytes/libwrclient
+
 It currently supports mp3 streams (using libmpg123 for decoding) and ogg/vorbis
 streams (using libogg and libvorbis) and uses libcurl for the http connection.
 
@@ -8,8 +10,8 @@ libwrclient has a simple API that allows you to set callbacks for the
 decoded audio (int16_t samples in the samplerate and channel count used by the
 stream), radio station info, current title etc.
 
-src/webradioclient.h is the header you should include to use libwrclient
-and documents the API.
+[src/webradioclient.h](src/webradioclient.h) is the header you should include to
+use libwrclient and documents the API.
 
 ```c
 #include "libwrclient.h"
@@ -78,8 +80,8 @@ static void my_reportErrorCB(void* userdata, int errorCode, const char* errormsg
 // ...
 ```
 
-src/sdl2client.c is a simple commandline webradio stream player that uses
-SDL2 for sound output and serves as an example on how to use the API.
+[src/sdl2client.c](src/sdl2client.c) is a simple commandline webradio stream player
+that uses SDL2 for sound output and serves as an example on how to use the API.
 
 libwrclient itself is released under the MIT license, but it uses libmpg123
 for mp3 decoding which is released under LGPL v2.1, so unless you disable mp3
