@@ -1,3 +1,12 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
+
+
 // the public interface of libwebradioclient
 
 #ifndef SRC_WEBRADIOCLIENT_H_
@@ -79,9 +88,10 @@ WRC_EXTERN void WRC_Shutdown();
 // * initAudioFn: This callback will be called to tell you about changes in the
 //                streams sameplerate or number of channels.
 //                Yes, this can actually happen during playback (e.g. when a new song starts)
-//                If you set playbackFn to NULL, this may be NULL, too.
+//                Only if you set playbackFn to NULL, this may be NULL, too.
 // * userdata: Will be passed to all your callbacks (including the metadata and error reporting ones!),
 //             so you can do with it whatever you want. May be NULL.
+// Returns NULL on error, otherwise a WRC_Stream object.
 WRC_EXTERN WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
                                         WRC_initAudioCB initAudioFn, void* userdata);
 

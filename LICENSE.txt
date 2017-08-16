@@ -1,0 +1,70 @@
+libwrclient itself (everything in src/) is released under MIT license.
+libwrclient includes the source code of (and links statically) libogg,
+libvorbis and libmpg123 (in libsrc/), which have their own licenses.
+
+Notably, libmpg123 is released under LGPL v2.1, which effectively puts
+the libwrclient binary under LGPL if compiled with MP3 support!
+On some platforms (like closed gaming consoles and probably Apple's iOS)
+you're not allowed to use LGPL software, so you can't use libwrclient
+with MP3 support there. You can disable MP3 support by commenting out
+"#define WRC_MP3 1" in src/internal.h and then not linking libmpg123.
+Note that LGPL also forbids static linking into software that's
+not open source - dynamic linking however (using as .dll/.so) is ok.
+
+libwrclient license:
+
+  Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co KG
+  
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+  
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+  
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+
+libogg and libvorbis (http://www.xiph.org/) are released under a
+  BSD-style license, see libsrc/libogg/COPYING and libsrc/libvorbis/COPYING
+
+libmpg123 (http://mpg123.org) is released under LGPL v2.1:
+        Copyright (c) 1995-2013 by Michael Hipp and others,
+        free software under the terms of the LGPL v2.1
+  See libsrc/mpg123/COPYING for more details.
+  Note that it also mentions source files under plain GPL; libwrclient
+  does not use those.
+
+
+We also include libcurl (http://curl.haxx.se/) binaries and headers
+in the repo to make building easier.
+It's released under the following license:
+
+  Copyright (c) 1996 - 2017, Daniel Stenberg, daniel@haxx.se.
+
+  All rights reserved.
+
+  Permission to use, copy, modify, and distribute this software for any purpose
+  with or without fee is hereby granted, provided that the above copyright
+  notice and this permission notice appear in all copies.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+  USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+  Except as contained in this notice, the name of a copyright holder shall not
+  be used in advertising or otherwise to promote the sale, use or other dealings
+  in this Software without prior written authorization of the copyright holder.

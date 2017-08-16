@@ -1,3 +1,13 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
+
+// mp3 decoder, using libmpg123
+
 #include "internal.h"
 
 #ifdef WRC_MP3

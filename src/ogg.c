@@ -1,3 +1,13 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
+
+// ogg/vorbis decoder, using libogg+libvorbis
+
 #include "internal.h"
 
 #ifdef WRC_OGG

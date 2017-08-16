@@ -1,8 +1,18 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
+
+// Example for using libwrclient with SDL2:
+
 #include <SDL.h>
 #include "webradioclient.h"
 
-// build with: clang -ggdb -Wall -o wrclient `/opt/sdl2/bin/sdl2-config --cflags` -I src/ src/sdl2client.c \
-//             `/opt/sdl2/bin/sdl2-config --libs` -L./ -lwrclient -Wl,-rpath,'$ORIGIN'
+// build with: gcc -ggdb -Wall -o wrclient `sdl2-config --cflags` -I src/ src/sdl2client.c \
+//             `sdl2-config --libs` -L./ -lwrclient -Wl,-rpath,'$ORIGIN'
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 

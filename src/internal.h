@@ -1,3 +1,10 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
 
 // internal declarations shared between .c files
 #ifndef SRC_INTERNAL_H_

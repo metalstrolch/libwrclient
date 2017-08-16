@@ -1,3 +1,12 @@
+/*
+ * libwrclient - webradio client library
+ *
+ * Copyright (C) 2015-2017 Masterbrain Bytes GmbH & Co. KG
+ *
+ * Released under MIT license, see LICENSE.txt
+ */
+
+// most of libwrclient (except the format-specific decoding) is implemented here
 
 #include "internal.h"
 #include <stdarg.h>
