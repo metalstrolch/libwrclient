@@ -166,6 +166,13 @@ static bool decodeDummyFail(WRC_Stream* ctx, void* data, size_t size)
 	return false;
 }
 
+static bool decodePlaylist(WRC_Stream* ctx, void* data, size_t size)
+{
+   printf("--snip-- %s --snip--\n",(char *)data);
+   snprintf(ctx->url, sizeof(ctx->url)-1, "%s", "http://wackenradio-high.rautemusik.fm");
+	return true;
+}
+
 static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 {
 	const char* lineAfterEnd = line+len;
@@ -189,6 +196,19 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 		}
 		else
 #endif // WRC_OGG
+		if(strCmpToNL(str, "audio/x-mpegurl") == 0 ||
+			strCmpToNL(str, "application/x-winamp-playlist") == 0 ||
+			strCmpToNL(str, "audio/mpegurl") == 0 ||
+			strCmpToNL(str, "audio/mpeg-url") == 0 ||
+			strCmpToNL(str, "audio/playlist") == 0 ||
+			strCmpToNL(str, "audio/scpls") == 0 ||
+			strCmpToNL(str, "audio/x-scpls") == 0)
+		{
+			ctx->contentType = WRC_CONTENT_PLAYLIST;
+			ctx->decode = decodePlaylist;
+			ctx->streamState = WRC__STREAM_PLAYLIST;
+		}
+		else
 		{
 			ctx->contentType = WRC_CONTENT_UNKNOWN;
 			ctx->decode = decodeDummyFail; // this returns false so curlWriteFun() will abort
@@ -533,6 +553,7 @@ static bool prepareCURL(WRC_Stream* ctx)
 	return true;
 }
 
+static void resetStream(WRC_Stream* ctx);
 static bool execCurlRequest(WRC_Stream* ctx)
 {
 	CURLcode res = curl_easy_perform(ctx->curl);
@@ -541,6 +562,24 @@ static bool execCurlRequest(WRC_Stream* ctx)
 	{
 		curl_slist_free_all(ctx->headers);
 		ctx->headers = NULL;
+	}
+
+	if(res == CURLE_OK)
+	{
+		if(ctx->streamState == WRC__STREAM_PLAYLIST)
+		{
+			// url was playlist. Now we should have the real stream in ctx->url
+			resetStream(ctx);
+			prepareCURL(ctx);
+
+			CURLcode res = curl_easy_perform(ctx->curl);
+
+			if(ctx->headers != NULL)
+			{
+				curl_slist_free_all(ctx->headers);
+				ctx->headers = NULL;
+			}
+		}
 	}
 
 	if(res != CURLE_OK)
