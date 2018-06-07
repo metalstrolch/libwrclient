@@ -208,8 +208,8 @@ static bool decodePlaylist(WRC_Stream* ctx, void* data, size_t size)
 	// undetectable format. Trying raw
 	{
 		char * http;
-		printf(".raw (simple .m3u) found\n");
-		printf("--snip--\n %s \n--snip--\n",(char *)data);
+		//printf(".raw (simple .m3u) found\n");
+		//printf("--snip--\n %s \n--snip--\n",(char *)data);
 		http = strstr(data, "http://");
 		if(http != NULL)
 		{
@@ -228,7 +228,7 @@ static bool decodePlaylist(WRC_Stream* ctx, void* data, size_t size)
 	{
 		ctx->url[strlen(ctx->url)-1] = 0;
 	}
-	printf("Got URL: \"%s\"\n", ctx->url);
+	//printf("Got URL: \"%s\"\n", ctx->url);
 	return true;
 }
 
