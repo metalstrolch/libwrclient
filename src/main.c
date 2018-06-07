@@ -168,8 +168,67 @@ static bool decodeDummyFail(WRC_Stream* ctx, void* data, size_t size)
 
 static bool decodePlaylist(WRC_Stream* ctx, void* data, size_t size)
 {
-   printf("--snip-- %s --snip--\n",(char *)data);
-   snprintf(ctx->url, sizeof(ctx->url)-1, "%s", "http://wackenradio-high.rautemusik.fm");
+	char format[20];
+	// create a format for scanf'ing to end of line with correct size
+	snprintf(format, sizeof(format), "%%%zu[^\n]", sizeof(ctx->url) -1);
+
+	// make sure it always terminates
+	((char*)data)[size -1] = 0;
+
+	// check for .pls file type
+	if(strstr(data, "[playlist]") != NULL)
+	{
+		char * file1 = NULL;
+		//check for File1
+		file1 = strstr(data, "File1");
+		if(file1 != NULL)
+		{
+			char * equal = NULL;
+			equal = strstr(file1, "=");
+			if(equal != NULL)
+			{
+				equal ++; // skip "="
+				sscanf(equal, format, ctx->url);
+			}
+		}
+	}
+	else
+	// check for extended .m3u file type
+	if(strstr(data,"#EXTM3U")!= NULL)
+	{
+		//OK, this is a rather brute force way of parsing it...
+		char * http;
+		http = strstr(data, "http://");
+		if(http != NULL)
+		{
+			sscanf(http, format, ctx->url);
+		}
+	}
+	else
+	// undetectable format. Trying raw
+	{
+		char * http;
+		printf(".raw (simple .m3u) found\n");
+		printf("--snip--\n %s \n--snip--\n",(char *)data);
+		http = strstr(data, "http://");
+		if(http != NULL)
+		{
+			sscanf(http, format, ctx->url);
+		}
+	}
+
+	if(ctx->url[0] == 0)
+	{
+		WRC__errorReset(ctx, WRC_ERR_UNSUPPORTED_FORMAT, "playlist contains no url");
+		return false;
+	}
+
+	// eliminate CR if present
+	if(ctx->url[strlen(ctx->url)-1] == 0x0D)
+	{
+		ctx->url[strlen(ctx->url)-1] = 0;
+	}
+	printf("Got URL: \"%s\"\n", ctx->url);
 	return true;
 }
 
@@ -204,6 +263,9 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 			strCmpToNL(str, "audio/scpls") == 0 ||
 			strCmpToNL(str, "audio/x-scpls") == 0)
 		{
+			// reset stream url, as this could cause loop if actual playlist result
+			// contains no url
+			ctx->url[0] = 0;
 			ctx->contentType = WRC_CONTENT_PLAYLIST;
 			ctx->decode = decodePlaylist;
 			ctx->streamState = WRC__STREAM_PLAYLIST;
@@ -564,7 +626,6 @@ static bool execCurlRequest(WRC_Stream* ctx)
 		curl_slist_free_all(ctx->headers);
 		ctx->headers = NULL;
 	}
-
 	if(res == CURLE_OK)
 	{
 		if(ctx->streamState == WRC__STREAM_PLAYLIST)
@@ -573,7 +634,7 @@ static bool execCurlRequest(WRC_Stream* ctx)
 			resetStreamIntern(ctx); // keep userAbort if set
 			prepareCURL(ctx);
 
-			CURLcode res = curl_easy_perform(ctx->curl);
+			res = curl_easy_perform(ctx->curl);
 
 			if(ctx->headers != NULL)
 			{
