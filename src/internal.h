@@ -12,6 +12,7 @@
 
 #include "webradioclient.h"
 
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -109,6 +110,7 @@ struct WRC__Stream
 	char* contentTypeHeaderVal;
 
 	enum WRC__STREAM_STATE streamState;
+	bool userAbort;
 
 	char headerBuf[8192];
 	int headerBufAfterEndIdx;
