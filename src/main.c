@@ -166,6 +166,72 @@ static bool decodeDummyFail(WRC_Stream* ctx, void* data, size_t size)
 	return false;
 }
 
+static bool decodePlaylist(WRC_Stream* ctx, void* data, size_t size)
+{
+	char format[20];
+	// create a format for scanf'ing to end of line with correct size
+	snprintf(format, sizeof(format), "%%%zu[^\n]", sizeof(ctx->url) -1);
+
+	// make sure it always terminates
+	((char*)data)[size -1] = 0;
+
+	// check for .pls file type
+	if(strstr(data, "[playlist]") != NULL)
+	{
+		char * file1 = NULL;
+		//check for File1
+		file1 = strstr(data, "File1");
+		if(file1 != NULL)
+		{
+			char * equal = NULL;
+			equal = strstr(file1, "=");
+			if(equal != NULL)
+			{
+				equal ++; // skip "="
+				sscanf(equal, format, ctx->url);
+			}
+		}
+	}
+	else
+	// check for extended .m3u file type
+	if(strstr(data,"#EXTM3U")!= NULL)
+	{
+		//OK, this is a rather brute force way of parsing it...
+		char * http;
+		http = strstr(data, "http://");
+		if(http != NULL)
+		{
+			sscanf(http, format, ctx->url);
+		}
+	}
+	else
+	// undetectable format. Trying raw
+	{
+		char * http;
+		//printf(".raw (simple .m3u) found\n");
+		//printf("--snip--\n %s \n--snip--\n",(char *)data);
+		http = strstr(data, "http://");
+		if(http != NULL)
+		{
+			sscanf(http, format, ctx->url);
+		}
+	}
+
+	if(ctx->url[0] == 0)
+	{
+		WRC__errorReset(ctx, WRC_ERR_UNSUPPORTED_FORMAT, "playlist contains no url");
+		return false;
+	}
+
+	// eliminate CR if present
+	if(ctx->url[strlen(ctx->url)-1] == 0x0D)
+	{
+		ctx->url[strlen(ctx->url)-1] = 0;
+	}
+	//printf("Got URL: \"%s\"\n", ctx->url);
+	return true;
+}
+
 static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 {
 	const char* lineAfterEnd = line+len;
@@ -189,6 +255,22 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 		}
 		else
 #endif // WRC_OGG
+		if(strCmpToNL(str, "audio/x-mpegurl") == 0 ||
+			strCmpToNL(str, "application/x-winamp-playlist") == 0 ||
+			strCmpToNL(str, "audio/mpegurl") == 0 ||
+			strCmpToNL(str, "audio/mpeg-url") == 0 ||
+			strCmpToNL(str, "audio/playlist") == 0 ||
+			strCmpToNL(str, "audio/scpls") == 0 ||
+			strCmpToNL(str, "audio/x-scpls") == 0)
+		{
+			// reset stream url, as this could cause loop if actual playlist result
+			// contains no url
+			ctx->url[0] = 0;
+			ctx->contentType = WRC_CONTENT_PLAYLIST;
+			ctx->decode = decodePlaylist;
+			ctx->streamState = WRC__STREAM_PLAYLIST;
+		}
+		else
 		{
 			ctx->contentType = WRC_CONTENT_UNKNOWN;
 			ctx->decode = decodeDummyFail; // this returns false so curlWriteFun() will abort
@@ -332,7 +414,7 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 
 	char* remData = freshData;
 
-	if(ctx->streamState >= WRC__STREAM_ABORT_GRACEFULLY)
+	if(ctx->streamState >= WRC__STREAM_ABORT_GRACEFULLY || ctx->userAbort)
 	{
 		// if this function doesn't return size*nmemb,
 		// cURL will assume an error and abort.
@@ -533,6 +615,8 @@ static bool prepareCURL(WRC_Stream* ctx)
 	return true;
 }
 
+static void resetStreamIntern(WRC_Stream* ctx);
+
 static bool execCurlRequest(WRC_Stream* ctx)
 {
 	CURLcode res = curl_easy_perform(ctx->curl);
@@ -542,10 +626,27 @@ static bool execCurlRequest(WRC_Stream* ctx)
 		curl_slist_free_all(ctx->headers);
 		ctx->headers = NULL;
 	}
+	if(res == CURLE_OK)
+	{
+		if(ctx->streamState == WRC__STREAM_PLAYLIST)
+		{
+			// url was playlist. Now we should have the real stream in ctx->url
+			resetStreamIntern(ctx); // keep userAbort if set
+			prepareCURL(ctx);
+
+			res = curl_easy_perform(ctx->curl);
+
+			if(ctx->headers != NULL)
+			{
+				curl_slist_free_all(ctx->headers);
+				ctx->headers = NULL;
+			}
+		}
+	}
 
 	if(res != CURLE_OK)
 	{
-		if(ctx->streamState < WRC__STREAM_ABORT_GRACEFULLY)
+		if((!ctx->userAbort) && (ctx->streamState < WRC__STREAM_ABORT_GRACEFULLY))
 		{
 			// probably an error while connecting, might be worth reporting
 			// TODO: we could possibly use res to report different kinds of errors
@@ -559,8 +660,7 @@ static bool execCurlRequest(WRC_Stream* ctx)
 }
 
 #define WRC_CTX_FREE(x) free(ctx->x); ctx->x = NULL;
-
-static void resetStream(WRC_Stream* ctx)
+static void resetStreamIntern(WRC_Stream* ctx)
 {
 	// basically, we wanna clear everything except for the URL and the user supplied callbacks
 	if(ctx->curl != NULL)
@@ -603,6 +703,13 @@ static void resetStream(WRC_Stream* ctx)
 
 	// the rest is userdata, which can remain as it is
 }
+
+static void resetStream(WRC_Stream* ctx)
+{
+	resetStreamIntern(ctx);
+	ctx->userAbort = false;
+}
+
 
 #undef WRC_CTX_FREE
 
@@ -678,6 +785,8 @@ WRC_Stream* WRC_CreateStream(const char* url, WRC_playbackCB playbackFn,
 	// set default samplerate + number of channels
 	ret->sampleRate = 44100;
 	ret->numChannels = 2;
+	
+	ret->userAbort = false;
 
 	return ret;
 }
@@ -720,7 +829,7 @@ int WRC_StartStreaming(WRC_Stream* stream)
 
 	int ret = execCurlRequest(stream);
 
-	if(stream->streamState == WRC__STREAM_ABORT_GRACEFULLY)
+	if((stream->userAbort) || (stream->streamState == WRC__STREAM_ABORT_GRACEFULLY))
 	{
 		// ret might be 0 even if we tried to shut down gracefully - after all,
 		// curl assumes an error when the callback returns 0..
@@ -736,9 +845,9 @@ int WRC_StartStreaming(WRC_Stream* stream)
 // WRC_StartStreaming() will return shortly after you called this.
 void WRC_StopStreaming(WRC_Stream* stream)
 {
-	if(stream->streamState < WRC__STREAM_ABORT_GRACEFULLY)
+	if(!stream->userAbort)
 	{
-		stream->streamState = WRC__STREAM_ABORT_GRACEFULLY;
+		stream->userAbort = true;
 	}
 }
 

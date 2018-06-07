@@ -12,6 +12,7 @@
 
 #include "webradioclient.h"
 
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -30,6 +31,7 @@
 
 enum WRC__CONTENT_TYPE {
 	WRC_CONTENT_UNKNOWN = 0,
+	WRC_CONTENT_PLAYLIST,
 	WRC_CONTENT_MP3,
 	WRC_CONTENT_OGGVORBIS,
 	// TODO: other formats?
@@ -39,6 +41,7 @@ enum WRC__STREAM_STATE {
 	WRC__STREAM_FRESH = 0,
 	WRC__STREAM_ICY_HEADER_IN_BODY,
 	WRC__STREAM_MUSIC,
+	WRC__STREAM_PLAYLIST,
 	WRC__STREAM_ABORT_GRACEFULLY,
 	WRC__STREAM_ABORT_ERROR
 };
@@ -107,6 +110,7 @@ struct WRC__Stream
 	char* contentTypeHeaderVal;
 
 	enum WRC__STREAM_STATE streamState;
+	bool userAbort;
 
 	char headerBuf[8192];
 	int headerBufAfterEndIdx;
