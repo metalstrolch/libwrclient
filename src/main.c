@@ -480,79 +480,135 @@ static size_t curlWriteFun(void* freshData, size_t size, size_t nmemb, void* con
 			return 0;
 		}
 	}
-
-	if(ctx->icyMetaInt != 0)
+	// ICY stream is samples multiplexed with ICY meta data. Frequency of meta data
+	// comes in icy-metaint http header. So if not set or zero, just decode the raw
+	// stream
+	if(ctx->icyMetaInt == 0)
 	{
-		int dataToNextMeta = ctx->icyMetaInt - ctx->dataReadSinceLastIcyMeta;
+		// decode raw stream
+		if(!decodeMusic(ctx, remData, remDataSize))
+		{
+			// there was an error, abort download
+			return 0;
+		}
+	}
+	else
+	{
+		// Server say'd it sends ICY meta data. Metedata comes after each 
+		// ctx->icyMetaInt processed bytes. It's first byte contains the number
+		// of meta data bytes following.
+
 		if(ctx->icyMetaBytesMissing > 0)
 		{
-			char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
-			int writeMdBytes = WRC__min(remDataSize, ctx->icyMetaBytesMissing);
-			memcpy(mdBuf + ctx->icyMetaBytesWritten, remData, writeMdBytes);
+			// Data ended last time while in meta data: continue reading the
+			// meta data. Then proceed.
 
-			remDataSize -= writeMdBytes;
-			remData += writeMdBytes;
-			ctx->icyMetaBytesMissing -= writeMdBytes;
-			ctx->icyMetaBytesWritten += writeMdBytes;
-			if(ctx->icyMetaBytesMissing == 0)
+			size_t metaToRead = ctx->icyMetaBytesMissing;
+
+			// just for paranoia:
+			ctx->dataReadSinceLastIcyMeta = 0;
+
+			if(metaToRead > remDataSize)
+			metaToRead = remDataSize;
+
+			if(remDataSize > 0)
 			{
-				stripIcyMetaBufAndTellUser(ctx, mdBuf);
-				ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
-				ctx->dataReadSinceLastIcyMeta = 0;
-				ctx->icyMetaBytesWritten = 0;
-			}
-		}
-		else if(dataToNextMeta < remDataSize)
-		{
-			if(!decodeMusic(ctx, remData, dataToNextMeta))
-			{
-				// there was an error, abort downloading stream
-				return 0;
-			}
-
-			remData += dataToNextMeta;
-			remDataSize -= dataToNextMeta;
-			int numBytes = ((unsigned char*)remData)[0] * 16;
-
-			// skip the metadata length byte
-			++remData;
-			--remDataSize;
-
-			if(numBytes == 0)
-			{
-				// no new metadata this time, start counting again
-				ctx->dataReadSinceLastIcyMeta = 0;
-			}
-			else
-			{
-				char* mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
-				int writeMdBytes = WRC__min(remDataSize, numBytes);
-				memcpy(mdBuf, remData, writeMdBytes);
-
-				remDataSize -= writeMdBytes;
-				remData += writeMdBytes;
-				ctx->icyMetaBytesMissing = numBytes - writeMdBytes;
-				ctx->icyMetaBytesWritten = writeMdBytes;
-				if(ctx->icyMetaBytesMissing == 0)
+				// Still data left. Read meta data
+				char * mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
+				size_t metaToRead = ctx->icyMetaBytesMissing;
+				if(metaToRead > remDataSize)
+				metaToRead = remDataSize;
+				if(metaToRead > 0)
 				{
+					memcpy(mdBuf + ctx->icyMetaBytesWritten, remData, metaToRead);
+					remDataSize -= metaToRead;
+					remData += metaToRead;
+					ctx->icyMetaBytesMissing -= metaToRead;
+					ctx->icyMetaBytesWritten += metaToRead;
+				}
+				if(ctx->icyMetaBytesMissing <= 0)
+				{
+					// process meta data
 					stripIcyMetaBufAndTellUser(ctx, mdBuf);
+					// switch buffer
 					ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
-					ctx->dataReadSinceLastIcyMeta = 0;
+					// done reading meta data
+					ctx->icyMetaBytesMissing = 0;
 					ctx->icyMetaBytesWritten = 0;
 				}
 			}
 		}
 
-		ctx->dataReadSinceLastIcyMeta += remDataSize;
+		while (remDataSize > 0)
+		{
+			// contuinue reading the stream data until next header
+			size_t dataToRead = ctx->icyMetaInt - ctx->dataReadSinceLastIcyMeta;
+			// just for paranoia
+			if(dataToRead < 0)
+				dataToRead = 0;
+
+			if(dataToRead > remDataSize)
+				dataToRead = remDataSize;
+
+			if(dataToRead > 0)
+			{
+				// just for paranoia
+				ctx->icyMetaBytesMissing = 0;
+
+				if(!decodeMusic(ctx, remData, dataToRead))
+				{
+					// there was an error, abort downloading stream
+					return 0;
+				}
+				ctx->dataReadSinceLastIcyMeta += dataToRead;
+				remData += dataToRead;
+				remDataSize -= dataToRead;
+			}
+
+			if((remDataSize > 0) && (ctx->dataReadSinceLastIcyMeta >= ctx->icyMetaInt))
+			{
+				// done reading data
+				ctx->dataReadSinceLastIcyMeta = 0;
+				ctx->icyMetaBytesWritten = 0;
+
+				// next byte is meta data size.
+				ctx->icyMetaBytesMissing = ((unsigned char*)remData)[0] * 16;
+				// skip meta data size byte
+				remData ++;
+				remDataSize --;
+				if((remDataSize > 0) && (ctx->icyMetaBytesMissing > 0))
+				{
+					// Still data left. Read meta data
+					char * mdBuf = ctx->icyMetadata[!ctx->icyMetadataIdx];
+					size_t metaToRead = ctx->icyMetaBytesMissing;
+					if(metaToRead > remDataSize)
+					metaToRead = remDataSize;
+
+					if(metaToRead > 0)
+					{
+						memcpy(mdBuf + ctx->icyMetaBytesWritten, remData, metaToRead);
+						remDataSize -= metaToRead;
+						remData += metaToRead;
+						ctx->icyMetaBytesMissing -= metaToRead;
+						ctx->icyMetaBytesWritten += metaToRead;
+					}
+
+					if(ctx->icyMetaBytesMissing <= 0)
+					{
+						// process meta data
+						stripIcyMetaBufAndTellUser(ctx, mdBuf);
+						// switch buffer
+						ctx->icyMetadataIdx = !ctx->icyMetadataIdx;
+						// done reading meta data
+						ctx->icyMetaBytesMissing = 0;
+						ctx->icyMetaBytesWritten = 0;
+					}
+				}
+			}
+			// continue if still something left
+		}
+
 	}
-
-
-	if(!decodeMusic(ctx, remData, remDataSize))
-	{
-		// there was an error, abort download
-		return 0;
-	}
-
 	return freshDataSize;
 }
 
