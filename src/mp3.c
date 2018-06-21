@@ -17,6 +17,7 @@ static void shutdownMP3(WRC_Stream* ctx)
 	if(ctx->handle != NULL)
 	{
 		mpg123_close(ctx->handle);
+      mpg123_delete(ctx->handle);
 		ctx->handle = NULL;
 	}
 }
