@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.1)
 
 
 # Create a library called "libwrclient".
@@ -20,6 +20,7 @@ include_directories(${vorbis_INCLUDE_DIR})
 
 #add a compile target for our shared library
 add_library (wrclient STATIC decode_html_ents.c main.c  mp3.c  ogg.c)
+set_property(TARGET wrclient PROPERTY C_STANDARD 99)
 
 # Add the current directory to include directories
 target_include_directories (wrclient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -56,6 +57,7 @@ find_package(SDL2)
 if(${SDL2_FOUND})
 	include_directories(${SDL2_INCLUDE_DIRS})
 	add_executable (client sdl2client.c)
+	set_property(TARGET client PROPERTY C_STANDARD 99)
 	target_link_libraries(client wrclient ${SDL2_LIBRARIES}
 		${ogg_LIBRARIES} ${vorbis_LIBRARIES} ${libmpg123_LIBRARIES}
 		${CURL_LIBRARY})
