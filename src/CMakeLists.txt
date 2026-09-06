@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.1)
-
+cmake_minimum_required(VERSION 4.0)
+include(GNUInstallDirs)
 
 # Create a library called "libwrclient".
-project (LIBWRCLIENT VERSION 0.1 LANGUAGES C)
+project (LIBWRCLIENT VERSION 1.0 LANGUAGES C)
 
 include(FindPkgConfig)
 
@@ -19,7 +19,7 @@ pkg_check_modules(vorbis REQUIRED vorbis)
 include_directories(${vorbis_INCLUDE_DIR})
 
 #add a compile target for our shared library
-add_library (wrclient STATIC decode_html_ents.c main.c  mp3.c  ogg.c)
+add_library (wrclient decode_html_ents.c main.c  mp3.c  ogg.c)
 set_property(TARGET wrclient PROPERTY C_STANDARD 99)
 
 # Add the current directory to include directories
@@ -34,8 +34,8 @@ target_include_directories (wrclient PUBLIC
 INSTALL(
 	TARGETS wrclient
 	EXPORT libwrclientConfig #export for others to include
-	ARCHIVE DESTINATION lib #static if any goes to
-	LIBRARY DESTINATION lib #shared if any goes to
+	ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} #static if any goes to
+	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} #shared if any goes to
 	RUNTIME DESTINATION bin #windows location for binary
 	INCLUDES DESTINATION include
 )
