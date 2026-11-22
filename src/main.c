@@ -654,9 +654,10 @@ static bool prepareCURL(WRC_Stream* ctx)
 
 	curl_easy_setopt(curl, CURLOPT_URL, ctx->url);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1 );
-	curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1); // follow http 3xx redirects
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "libwrclient/1.0");
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // follow http 3xx redirects
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10);
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 

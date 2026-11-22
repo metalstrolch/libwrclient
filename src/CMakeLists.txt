@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 4.0)
-include(GNUInstallDirs)
 
 # Create a library called "libwrclient".
 project (LIBWRCLIENT VERSION 1.0 LANGUAGES C)
+include(GNUInstallDirs)
 
 include(FindPkgConfig)
 
