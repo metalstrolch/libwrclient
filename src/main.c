@@ -665,6 +665,8 @@ static bool prepareCURL(WRC_Stream* ctx)
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curlHeaderFun);
 	curl_easy_setopt(curl, CURLOPT_WRITEHEADER, ctx);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
 
 	ctx->curl = curl;
 	ctx->headers = headers;
