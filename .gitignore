@@ -8,3 +8,4 @@
 /Premake/Makefile
 /Premake/*.a
 /libwrclient.so
+build

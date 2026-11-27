@@ -21,6 +21,7 @@
 
 #define WRC_OGG 1
 #define WRC_MP3 1
+#define WRC_AAC 1
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__) // TODO: remove
 
@@ -34,6 +35,7 @@ enum WRC__CONTENT_TYPE {
 	WRC_CONTENT_PLAYLIST,
 	WRC_CONTENT_MP3,
 	WRC_CONTENT_OGGVORBIS,
+	WRC_CONTENT_AAC,
 	// TODO: other formats?
 };
 
@@ -88,6 +90,21 @@ struct WRC__oggVorbisContext
 
 #endif // WRC_OGG
 
+#ifdef WRC_AAC
+#include <neaacdec.h>
+
+bool WRC__decodeAAC(WRC_Stream* ctx, void* data, size_t size);
+
+struct WRC__aacContext
+{
+	NeAACDecHandle dec;
+	bool initialized;
+	unsigned char* buf; // unconsumed input (ADTS frames may span chunks)
+	size_t bufSize;
+	size_t bufCap;
+};
+#endif // WRC_AAC
+
 static inline int WRC__min(int a, int b) { return a < b ? a : b; }
 
 void WRC__errorReset(WRC_Stream* ctx, int errorCode, const char* format, ...);
@@ -138,6 +155,10 @@ struct WRC__Stream
 
 #ifdef WRC_OGG
 	struct WRC__oggVorbisContext ogg;
+#endif
+
+#ifdef WRC_AAC
+	struct WRC__aacContext aac;
 #endif
 
 	// function pointers for the implementation of the current format
