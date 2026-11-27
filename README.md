@@ -4,7 +4,7 @@ It was developed for (and is used by) [Cattle And Crops](https://www.cattleandcr
 The project's website is https://github.com/MasterbrainBytes/libwrclient
 
 It currently supports mp3 streams (using libmpg123 for decoding) and ogg/vorbis
-streams (using libogg and libvorbis), and AAC/ADTS streams (using libfaad) and uses libcurl for the http connection.
+streams (using libogg and libvorbis), ogg/opus streams (using libopus), and AAC/ADTS streams (using libfaad) and uses libcurl for the http connection.
 
 libwrclient has a simple API that allows you to set callbacks for the
 decoded audio (int16_t samples in the samplerate and channel count used by the

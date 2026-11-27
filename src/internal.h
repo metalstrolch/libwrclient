@@ -53,7 +53,8 @@ enum WRC__OGG_DECODE_STATE {
 	WRC_OGGDEC_VORBISINFO,
 	WRC_OGGDEC_COMMENT,
 	WRC_OGGDEC_SETUP,
-	WRC_OGGDEC_STREAMDEC
+	WRC_OGGDEC_STREAMDEC,
+	WRC_OGGDEC_OPUSTAGS // opus only: waiting for the OpusTags header
 };
 
 // number of samples in the temporary decoding buffer that is then passed to WRC_playbackCB()
@@ -69,6 +70,7 @@ bool WRC__decodeMP3(WRC_Stream* ctx, void* data, size_t size);
 
 #ifdef WRC_OGG
 #include <vorbis/codec.h>
+#include <opus/opus.h>
 
 bool WRC__decodeOGG(WRC_Stream* ctx, void* data, size_t size);
 
@@ -83,6 +85,9 @@ struct WRC__oggVorbisContext
 	vorbis_comment   vc; // contains the info from the comment header (artist, title etc)
 	vorbis_dsp_state vd; // contains the state of the vorbis (packet to PCM) decoder
 	vorbis_block     vb; // local working space for packet->PCM decode
+
+	OpusDecoder*     opusDec; // non-NULL if the current logical stream is ogg/opus
+	int              opusPreSkip; // samples (at 48kHz) still to be discarded
 
 	enum WRC__OGG_DECODE_STATE state;
 	int maxBufSamplesPerChan;

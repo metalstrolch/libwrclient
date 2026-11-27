@@ -18,11 +18,15 @@ include_directories(${ogg_INCLUDE_DIR})
 pkg_check_modules(vorbis REQUIRED vorbis)
 include_directories(${vorbis_INCLUDE_DIR})
 
+pkg_check_modules(opus REQUIRED opus)
+include_directories(${opus_INCLUDEDIR})
+
 pkg_check_modules(faad REQUIRED faad2)
 include_directories(${faad_INCLUDEDIR})
 
 #add a compile target for our shared library
 add_library (wrclient decode_html_ents.c main.c  mp3.c  ogg.c  aac.c)
+target_link_libraries(wrclient ${opus_LIBRARIES})
 set_property(TARGET wrclient PROPERTY C_STANDARD 99)
 
 # Add the current directory to include directories
@@ -62,6 +66,6 @@ if(${SDL2_FOUND})
 	add_executable (client sdl2client.c)
 	set_property(TARGET client PROPERTY C_STANDARD 99)
 	target_link_libraries(client wrclient ${SDL2_LIBRARIES}
-		${ogg_LIBRARIES} ${vorbis_LIBRARIES} ${libmpg123_LIBRARIES} ${faad_LIBRARIES}
+		${ogg_LIBRARIES} ${vorbis_LIBRARIES} ${opus_LIBRARIES} ${libmpg123_LIBRARIES} ${faad_LIBRARIES}
 		${CURL_LIBRARY})
 endif()

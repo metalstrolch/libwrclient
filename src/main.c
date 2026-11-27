@@ -257,7 +257,8 @@ static void handleHeaderLine(WRC_Stream* ctx, const char* line, size_t len)
 		else
 #endif // WRC_AAC
 #ifdef WRC_OGG
-		if(strCmpToNL(str, "application/ogg") == 0 || strCmpToNL(str, "audio/ogg") == 0)
+		if(strCmpToNL(str, "application/ogg") == 0 || strCmpToNL(str, "audio/ogg") == 0 ||
+			strCmpToNL(str, "audio/opus") == 0)
 		{
 			ctx->contentType = WRC_CONTENT_OGGVORBIS;
 			ctx->decode = WRC__decodeOGG;
