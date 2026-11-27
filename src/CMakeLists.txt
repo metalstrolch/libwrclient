@@ -25,8 +25,11 @@ pkg_check_modules(faad REQUIRED faad2)
 include_directories(${faad_INCLUDEDIR})
 
 #add a compile target for our shared library
-add_library (wrclient decode_html_ents.c main.c  mp3.c  ogg.c  aac.c)
+add_library (wrclient SHARED decode_html_ents.c main.c  mp3.c  ogg.c  aac.c)
+target_link_libraries(wrclient ${libmpg123_LIBRARIES})
+target_link_libraries(wrclient ${ogg_LIBRARIES})
 target_link_libraries(wrclient ${opus_LIBRARIES})
+target_link_libraries(wrclient ${faad_LIBRARIES})
 set_property(TARGET wrclient PROPERTY C_STANDARD 99)
 
 # Add the current directory to include directories
